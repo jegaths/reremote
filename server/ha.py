@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any, Optional
 
 from matcher import button_masks
+from ota import hostname_for
 
 ACTION_DOMAINS = ("fan", "light", "switch", "scene", "script", "input_boolean", "automation")
 
@@ -138,6 +139,8 @@ def generate_config_h(settings: dict[str, str], buttons: list[dict[str, Any]],
         f"#define HA_URL    {_c_str((settings.get('ha_url', '') or '').rstrip('/'))}",
         f"#define HA_TOKEN  {_c_str(settings.get('ha_token', ''))}",
         f"#define RX_PIN    {int(pin)}",
+        f"#define HOSTNAME  {_c_str(hostname_for(settings.get('bridge_host')))}",
+        f"#define OTA_TOKEN {_c_str(settings.get('ota_token', ''))}",
         "",
         "struct ButtonMap {",
         "  uint8_t     protocol;",

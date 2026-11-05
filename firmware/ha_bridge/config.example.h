@@ -9,6 +9,8 @@
 #define HA_URL    "http://homeassistant.local:8123"
 #define HA_TOKEN  "eyJ...long-lived-access-token..."
 #define RX_PIN    4
+#define HOSTNAME  "rc-bridge"            // reachable as rc-bridge.local on the LAN
+#define OTA_TOKEN "random-secret"        // required in X-OTA-Token to update over WiFi
 
 struct ButtonMap {
   uint8_t     protocol;   // rc-switch protocol number

@@ -7,27 +7,39 @@
  * Home Assistant settings) and calls the mapped Home Assistant service over
  * WiFi using the REST API.
  *
+ * It also runs a tiny HTTP server so the rc-capture UI can update it over WiFi
+ * once it is installed somewhere out of reach:
+ *   GET  /status            JSON: version, ip, rssi, uptime, last press ...
+ *   POST /update            multipart upload of a new .bin  (header X-OTA-Token)
+ *   POST /reboot            restart                          (header X-OTA-Token)
+ * It announces itself on the LAN as <HOSTNAME>.local (mDNS).
+ *
  * Wiring: receiver VCC -> 3V3, GND -> GND, DAT -> GPIO RX_PIN (config.h), antenna 17.3 cm.
  *
  * Serial (115200, native USB) prints one line per event so the capture UI's
  * Serial log can follow along:
- *   I ha_bridge <version> buttons=<n> wifi=<ssid>
+ *   I ha_bridge <version> buttons=<n> wifi=<ssid> host=<hostname>
  *   W <wifi status / ip>
  *   R <protocol> <bits> <code hex>            every decoded frame
  *   M <button> -> <service> (<http status>)   a matched press that was sent to HA
  *   D <button> still held, new counter ignored   the button is being held; one action per press
+ *   U <over-the-air update progress>
  *   E <message>
  *
- * Build: ESP32S3 Dev Module, "USB CDC On Boot: Enabled". Library: rc-switch.
+ * Build: ESP32S3 Dev Module, "USB CDC On Boot: Enabled", default partition
+ * scheme (two OTA app slots). Library: rc-switch.
  */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <ESPmDNS.h>
 #include <RCSwitch.h>
 #include "config.h"
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 
 #ifndef RX_PIN
 #define RX_PIN 4
@@ -35,6 +47,12 @@
 #ifndef PRESS_GAP_MS
 #define PRESS_GAP_MS 500     // frames of the same button closer than this belong to one press,
                              // even if the remote's counter byte changed mid-hold
+#endif
+#ifndef OTA_TOKEN
+#define OTA_TOKEN ""         // empty = over-the-air updates disabled
+#endif
+#ifndef HOSTNAME
+#define HOSTNAME "rc-bridge"
 #endif
 
 static RCSwitch rx;
@@ -44,6 +62,10 @@ static const size_t N_BUTTONS = sizeof(BUTTONS) / sizeof(BUTTONS[0]);
 static unsigned long lastSeen[sizeof(BUTTONS) / sizeof(BUTTONS[0]) + 1];  // last frame of each button
 static uint32_t lastCodeByButton[sizeof(BUTTONS) / sizeof(BUTTONS[0]) + 1];
 
+static uint32_t pressCount = 0;
+static const char *lastPress = "";
+static unsigned long lastPressAt = 0;
+
 static void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) return;
   if (millis() - lastWifiTry < 5000 && lastWifiTry != 0) return;
@@ -51,6 +73,7 @@ static void connectWifi() {
   Serial.print(F("W connecting to "));
   Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.setHostname(HOSTNAME);
   WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 }
@@ -128,6 +151,9 @@ static void handleCode(uint8_t protocol, uint8_t bits, uint32_t code) {
     return;
   }
   lastCodeByButton[hit] = code;
+  pressCount++;
+  lastPress = b.name;
+  lastPressAt = now;
   if (!b.path || !b.path[0]) {
     Serial.print(F("M "));
     Serial.print(b.name);
@@ -151,20 +177,147 @@ static void handleCode(uint8_t protocol, uint8_t bits, uint32_t code) {
   Serial.println(F(" ms)"));
 }
 
+// ---- HTTP server: status + over-the-air update --------------------------------
+static WebServer web(80);
+static bool webUp = false;
+static bool mdnsUp = false;
+static bool otaAuthorized = false;
+static const char *COLLECT_HEADERS[] = {"X-OTA-Token"};
+
+static bool otaTokenOk() {
+  return OTA_TOKEN[0] != 0 && web.header("X-OTA-Token") == OTA_TOKEN;
+}
+
+static String jsonStr(const char *s) {
+  String out = "\"";
+  for (; s && *s; s++) {
+    if (*s == '"' || *s == '\\') out += '\\';
+    if (*s == '\n') { out += "\\n"; continue; }
+    out += *s;
+  }
+  return out + "\"";
+}
+
+static void handleStatus() {
+  String s = "{\"firmware\":\"ha_bridge\",\"version\":\"" FW_VERSION "\",\"hostname\":\"" HOSTNAME "\"";
+  s += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  s += ",\"rssi\":" + String(WiFi.RSSI());
+  s += ",\"uptime_s\":" + String(millis() / 1000);
+  s += ",\"buttons\":" + String(N_BUTTONS);
+  s += ",\"presses\":" + String(pressCount);
+  s += ",\"last_button\":" + jsonStr(lastPress);
+  s += ",\"last_press_ago_s\":" + (lastPressAt ? String((millis() - lastPressAt) / 1000) : String("null"));
+  s += ",\"free_heap\":" + String(ESP.getFreeHeap());
+  s += ",\"sketch_size\":" + String(ESP.getSketchSize());
+  s += ",\"sketch_md5\":\"" + ESP.getSketchMD5() + "\"";
+  s += ",\"ota\":";
+  s += OTA_TOKEN[0] ? "true" : "false";
+  s += "}";
+  web.send(200, "application/json", s);
+}
+
+static void handleUpdateDone() {
+  web.sendHeader("Connection", "close");
+  if (!otaAuthorized) {
+    web.send(401, "text/plain", "bad or missing X-OTA-Token");
+    return;
+  }
+  bool ok = !Update.hasError();
+  web.send(ok ? 200 : 500, "text/plain", ok ? "OK, rebooting" : Update.errorString());
+  if (ok) {
+    Serial.println(F("U update written, rebooting"));
+    delay(300);
+    ESP.restart();
+  }
+  Serial.print(F("E update failed: "));
+  Serial.println(Update.errorString());
+}
+
+static void handleUpdateUpload() {
+  HTTPUpload &up = web.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    otaAuthorized = otaTokenOk();
+    if (!otaAuthorized) {
+      Serial.println(F("E update rejected: bad token"));
+      return;
+    }
+    Serial.print(F("U update started: "));
+    Serial.println(up.filename);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      Serial.print(F("E "));
+      Serial.println(Update.errorString());
+    }
+  } else if (!otaAuthorized) {
+    return;
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      Serial.print(F("E "));
+      Serial.println(Update.errorString());
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) {
+      Serial.print(F("U update ok, "));
+      Serial.print(up.totalSize);
+      Serial.println(F(" bytes"));
+    } else {
+      Serial.print(F("E "));
+      Serial.println(Update.errorString());
+    }
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    Serial.println(F("E update aborted"));
+  }
+}
+
+static void handleReboot() {
+  if (!otaTokenOk()) {
+    web.send(401, "text/plain", "bad or missing X-OTA-Token");
+    return;
+  }
+  web.send(200, "text/plain", "rebooting");
+  delay(200);
+  ESP.restart();
+}
+
+static void startWebIfNeeded() {
+  if (!webUp) {
+    web.collectHeaders(COLLECT_HEADERS, 1);
+    web.on("/status", HTTP_GET, handleStatus);
+    web.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
+    web.on("/reboot", HTTP_POST, handleReboot);
+    web.onNotFound([]() { web.send(404, "text/plain", "ha_bridge: /status, /update, /reboot"); });
+    web.begin();
+    webUp = true;
+  }
+  if (!mdnsUp) {
+    mdnsUp = MDNS.begin(HOSTNAME);
+    if (mdnsUp) MDNS.addService("http", "tcp", 80);
+    Serial.print(F("W mDNS "));
+    Serial.print(HOSTNAME);
+    Serial.println(mdnsUp ? F(".local up") : F(" failed"));
+  }
+}
+
+static void printIdent() {
+  Serial.print(F("I ha_bridge "));
+  Serial.print(F(FW_VERSION));
+  Serial.print(F(" buttons="));
+  Serial.print(N_BUTTONS);
+  Serial.print(F(" wifi="));
+  Serial.print(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String(WIFI_SSID));
+  Serial.print(F(" host="));
+  Serial.print(HOSTNAME);
+  Serial.print(F(" rx_pin="));
+  Serial.println(RX_PIN);
+}
+
 void setup() {
   Serial.begin(115200);
 #if ARDUINO_USB_MODE
   Serial.setTxTimeoutMs(0);
 #endif
   delay(300);
-  Serial.print(F("I ha_bridge "));
-  Serial.print(F(FW_VERSION));
-  Serial.print(F(" buttons="));
-  Serial.print(N_BUTTONS);
-  Serial.print(F(" wifi="));
-  Serial.print(WIFI_SSID);
-  Serial.print(F(" rx_pin="));
-  Serial.println(RX_PIN);
+  printIdent();
   rx.enableReceive(digitalPinToInterrupt(RX_PIN));
   connectWifi();
 }
@@ -175,11 +328,15 @@ void loop() {
   if (connected && !wasConnected) {
     Serial.print(F("W connected, ip "));
     Serial.println(WiFi.localIP());
+    startWebIfNeeded();
   } else if (!connected && wasConnected) {
     Serial.println(F("W disconnected"));
+    MDNS.end();
+    mdnsUp = false;
   }
   wasConnected = connected;
   if (!connected) connectWifi();
+  if (webUp) web.handleClient();
 
   if (rx.available()) {
     uint32_t code = (uint32_t)rx.getReceivedValue();
@@ -198,13 +355,7 @@ void loop() {
       buf[len] = 0;
       if (len) {
         if (buf[0] == '?') {
-          Serial.print(F("I ha_bridge "));
-          Serial.print(F(FW_VERSION));
-          Serial.print(F(" buttons="));
-          Serial.print(N_BUTTONS);
-          Serial.print(F(" wifi="));
-          Serial.print(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("down"));
-          Serial.println();
+          printIdent();
         } else if (buf[0] == 'T') {
           int i = atoi(buf + 1);
           if (i >= 0 && (size_t)i < N_BUTTONS) {

@@ -61,6 +61,22 @@ def arduino_cli() -> Optional[str]:
     return shutil.which("arduino-cli")
 
 
+OTA_PREFIX = "ota:"
+
+
+def is_ota_port(port: Optional[str]) -> bool:
+    return bool(port) and port.lower().startswith(OTA_PREFIX)
+
+
+def ota_host(port: str) -> str:
+    return port[len(OTA_PREFIX):]
+
+
+def build_dir(sketch: str) -> Path:
+    """Where OTA builds leave their binaries (firmware/build/<sketch>/, gitignored)."""
+    return FIRMWARE_DIR / "build" / sketch
+
+
 # ---- sketches -----------------------------------------------------------------
 def _manifest(folder: Path) -> dict[str, Any]:
     mf = folder / "sketch.json"
@@ -87,6 +103,7 @@ def list_sketches() -> list[dict[str, Any]]:
             "libraries": m.get("libraries", []),
             "config": m.get("config"),
             "generated": m.get("generated", []),
+            "ota": bool(m.get("ota")),
             "files": sketch_files(folder.name),
             "modified": int(max(f.stat().st_mtime for f in folder.iterdir() if f.is_file())),
         })
@@ -194,13 +211,23 @@ class BuildRunner:
 
     def start(self, sketch: str, board: str, action: str, port: Optional[str] = None,
               before: Optional[Callable[[], None]] = None,
-              after: Optional[Callable[[bool], None]] = None) -> dict[str, Any]:
+              after: Optional[Callable[[bool], None]] = None,
+              uploader: Optional[Callable[[Path, Callable[..., None]], Any]] = None) -> dict[str, Any]:
+        """port "ota:<host>" flashes over WiFi: the binary goes to `uploader(bin_path, emit)`
+        instead of arduino-cli upload."""
         if action not in ("compile", "flash"):
             raise ValueError("action must be compile or flash")
         if board not in FQBN:
             raise ValueError(f"unknown board {board}")
         if action == "flash" and not port:
             raise ValueError("port required to flash")
+        if is_ota_port(port):
+            if board != "esp32s3":
+                raise ValueError("over-the-air updates are only possible on the ESP32-S3")
+            if not _manifest(sketch_dir(sketch)).get("ota"):
+                raise ValueError("this sketch has no over-the-air update support")
+            if action == "flash" and uploader is None:
+                raise ValueError("no OTA uploader configured")
         if not arduino_cli():
             raise RuntimeError("arduino-cli not found; run 'make setup'")
         folder = sketch_dir(sketch)
@@ -211,13 +238,15 @@ class BuildRunner:
                 raise RuntimeError("a build is already running")
             self.current = {"sketch": sketch, "board": board, "action": action, "port": port,
                             "started": time.time()}
-        threading.Thread(target=self._run, args=(folder, board, action, port, before, after),
+        threading.Thread(target=self._run, args=(folder, board, action, port, before, after, uploader),
                          name="build", daemon=True).start()
         return self.current
 
     def _run(self, folder: Path, board: str, action: str, port: Optional[str],
-             before: Optional[Callable[[], None]], after: Optional[Callable[[bool], None]]) -> None:
+             before: Optional[Callable[[], None]], after: Optional[Callable[[bool], None]],
+             uploader: Optional[Callable[[Path, Callable[..., None]], Any]] = None) -> None:
         ok = False
+        ota = is_ota_port(port)
         try:
             libs = _manifest(folder).get("libraries", [])
             if libs:
@@ -225,13 +254,28 @@ class BuildRunner:
                 self._stream(["arduino-cli", "lib", "install", *libs])
             if before:
                 before()
-            cmd = ["arduino-cli", "compile", "--fqbn", FQBN[board], str(folder)]
+            cmd = ["arduino-cli", "compile", "--fqbn", FQBN[board]]
+            if ota:
+                out_dir = build_dir(folder.name)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                cmd += ["--output-dir", str(out_dir)]
+            cmd.append(str(folder))
             self._emit("$ " + " ".join(cmd))
             rc = self._stream(cmd)
             if rc != 0:
                 self._emit(f"compile failed (exit {rc})", level="error")
                 return
-            if action == "flash":
+            if action == "flash" and ota:
+                bin_path = build_dir(folder.name) / f"{folder.name}.ino.bin"
+                if not bin_path.exists():
+                    self._emit(f"compiled binary not found at {bin_path}", level="error")
+                    return
+                try:
+                    uploader(bin_path, self._emit)  # type: ignore[misc]
+                except RuntimeError as e:
+                    self._emit(f"over-the-air update failed: {e}", level="error")
+                    return
+            elif action == "flash":
                 cmd = ["arduino-cli", "upload", "--fqbn", FQBN[board], "-p", port, str(folder)]
                 self._emit("$ " + " ".join(cmd))
                 rc = self._stream(cmd)

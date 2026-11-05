@@ -253,6 +253,9 @@ The database lives in `data/remotes.sqlite` (override with `RC_DB=`).
 | GET | `/api/ha/config.h` | the generated bridge config |
 | GET/DELETE | `/api/captures` | raw capture log |
 | GET | `/api/export` | full JSON dump |
+| GET | `/api/bridge/status` | probe the installed bridge over WiFi: online, version, ip, rssi, uptime, last press |
+| POST | `/api/bridge/reboot` | restart the installed bridge |
+| POST | `/api/firmware/build` with `"port": "ota:<host>"` | compile and push the binary to the bridge over WiFi |
 
 ### Tests
 
@@ -276,12 +279,32 @@ services over WiFi. The laptop is not needed after flashing.
    speed %, speed up/down, brightness %. Each row saves itself. **Run** calls
    the service from the server right away, so you can confirm the mapping
    before anything is flashed.
-3. **Build & flash bridge.** The server regenerates `firmware/ha_bridge/config.h`
-   from the settings and the mappings (WiFi password and token included, which
-   is why that file is gitignored), compiles the `ha_bridge` sketch, frees the
-   serial port, uploads, and reconnects. The bridge's log then appears in the
-   Serial log panel: `W` WiFi status and IP, `R` every decoded frame, `M`
-   matched presses with the HTTP status Home Assistant returned.
+3. **Flash over USB** (Installed bridge card). The server regenerates
+   `firmware/ha_bridge/config.h` from the settings and the mappings (WiFi
+   password and token included, which is why that file is gitignored), compiles
+   the `ha_bridge` sketch, frees the serial port, uploads, and reconnects. The
+   bridge's log then appears in the Serial log panel: `W` WiFi status and IP,
+   `R` every decoded frame, `M` matched presses with the HTTP status Home
+   Assistant returned, `U` over-the-air update progress.
+4. **Update over WiFi** from then on. Once installed somewhere out of reach the
+   bridge needs no cable: it answers on the LAN as `rc-bridge.local` (mDNS) and
+   the *Installed bridge* card shows whether it is online, its firmware version,
+   IP, WiFi signal, uptime and last press. **Update over WiFi** compiles the
+   sketch with the current settings and mappings and pushes the binary to the
+   bridge, which writes it to the spare OTA partition, verifies it and reboots;
+   the card and the build output report when it is back. **Reboot** restarts it.
+   The same WiFi target appears in the Firmware tab's port list, so any change
+   to the sketch itself can be pushed the same way.
+
+   The update endpoint is protected by a random token the server generates once
+   and compiles into every bridge build (`OTA_TOKEN` in `config.h`; the token
+   never leaves the local database otherwise). Because of that the *first*
+   build with over-the-air support (firmware 1.1.0 or newer) must go over USB;
+   every later one can go over WiFi. If `rc-bridge.local` does not resolve on
+   your network, put the bridge's IP (shown in the Serial log as `W connected,
+   ip …`) into **Bridge address**. The bridge keeps listening to the remote and
+   calling Home Assistant while it is being updated; only the reboot (about
+   three seconds) interrupts it.
 
 **"cannot reach … No route to host" on macOS** although the browser opens the
 same URL: macOS blocks local-network access for apps that have not been
@@ -293,10 +316,13 @@ Security → Local Network for your terminal app, then restart `make run`.
 Servers started from a background process cannot receive the prompt and stay
 blocked. The ESP32 is unaffected: it talks to Home Assistant over WiFi itself.
 
-On the board, a held button repeats the same code; identical codes within
-700 ms are treated as one press and each button has a 300 ms cooldown. Buttons
-with learned masks match on their stable bits, so the Crompton counter byte is
-ignored exactly as in the UI.
+On the board, a held button repeats its code; frames of the same button that
+arrive less than 500 ms apart belong to one press, whatever the counter byte
+does, so a press fires exactly one Home Assistant call even if that call takes
+a while. Buttons with learned masks match on their stable bits, so the Crompton
+counter byte is ignored exactly as in the UI. Prefer the plain `http://…:8123`
+URL of Home Assistant over `https://`: the TLS handshake on the ESP32 adds
+close to a second to the first call.
 
 To capture more buttons later, flash `rf_capture` back from the Firmware tab,
 capture, then flash `ha_bridge` again. Raw-timing buttons (not decodable by

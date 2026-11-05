@@ -4,7 +4,8 @@
   const $ = (id) => document.getElementById(id);
   const editor = $("fw-editor"), gutter = $("fw-gutter"), out = $("fw-output");
   let sketches = [], boards = {}, current = null, currentFile = null, dirty = false, building = false;
-  let lastPorts = [];
+  let lastPorts = [], bridge = null;
+  const isOta = (p) => (p || "").startsWith("ota:");
 
   // ---------- sketches -------------------------------------------------------
   async function loadSketches() {
@@ -27,7 +28,7 @@
   async function selectSketch(name) {
     if (dirty && !confirm("Discard unsaved changes?")) return;
     current = name; dirty = false; currentFile = null;
-    renderList(); renderFiles(); fillBoards();
+    renderList(); renderFiles(); renderPorts(); fillBoards();
     const s = sketches.find((x) => x.name === name);
     if (s && s.files.length) openFile(s.files[0]);
     updateButtons();
@@ -96,13 +97,20 @@
 
   // ---------- target ----------------------------------------------------------
   async function loadPorts() {
-    lastPorts = await api("/api/ports");
+    const [ports, br] = await Promise.all([api("/api/ports"), api("/api/bridge/status").catch(() => null)]);
+    lastPorts = ports; bridge = br;
+    renderPorts();
+  }
+  function renderPorts() {
     const sel = $("fw-port"); const cur = sel.value;
-    sel.innerHTML = lastPorts.length
-      ? lastPorts.map((p) => `<option value="${esc(p.device)}" data-board="${p.board}">${esc(p.device)} — ${esc(p.description)}</option>`).join("")
-      : `<option value="">No board detected</option>`;
-    if (cur && lastPorts.some((p) => p.device === cur)) sel.value = cur;
-    autoBoard();
+    const s = sketches.find((x) => x.name === current);
+    const opts = lastPorts.map((p) => `<option value="${esc(p.device)}" data-board="${p.board}">${esc(p.device)} — ${esc(p.description)}</option>`);
+    if (s && s.ota && bridge && bridge.online && bridge.ota) {
+      opts.push(`<option value="${esc(bridge.ota_port)}" data-board="esp32s3">WiFi: ${esc(bridge.host)} — ha_bridge ${esc(bridge.version)} at ${esc(bridge.ip)}</option>`);
+    }
+    sel.innerHTML = opts.join("") || `<option value="">No board detected</option>`;
+    if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+    autoBoard(); updateButtons();
   }
   function fillBoards() {
     const s = sketches.find((x) => x.name === current);
@@ -125,7 +133,8 @@
     $("fw-compile").disabled = building || !s;
     $("fw-flash").disabled = building || !s || !port;
     if (building) $("fw-hint").textContent = "Build running…";
-    else if (!port) $("fw-hint").textContent = "Plug the board in and it appears here. Flashing frees the serial port and reconnects it afterwards.";
+    else if (!port) $("fw-hint").textContent = "Plug the board in and it appears here. Flashing frees the serial port and reconnects it afterwards. A bridge that is online shows up as a WiFi target.";
+    else if (isOta(port)) $("fw-hint").textContent = "Compiles here and pushes the binary to the bridge over WiFi; it reboots into the new firmware. config.h is regenerated first.";
     else $("fw-hint").textContent = s && s.config ? "config.h is regenerated from the Home Assistant tab before each build." : "";
   }
 
@@ -142,7 +151,9 @@
   $("fw-compile").onclick = () => build("compile");
   $("fw-flash").onclick = () => {
     const s = sketches.find((x) => x.name === current);
-    if (!confirm(`Flash "${s.title}" to ${$("fw-port").value} as ${boards[$("fw-board").value]}?`)) return;
+    const port = $("fw-port").value;
+    const where = isOta(port) ? `the bridge at ${port.slice(4)} over WiFi` : `${port} as ${boards[$("fw-board").value]}`;
+    if (!confirm(`Flash "${s.title}" to ${where}?`)) return;
     build("flash");
   };
   $("fw-clear-out").onclick = () => { out.innerHTML = ""; };
@@ -159,17 +170,25 @@
     while (out.children.length > 800) out.firstChild.remove();
     out.scrollTop = out.scrollHeight;
     // the page may be on another tab; make sure the Firmware tab is visible when flashing starts
-    if (ev.line.startsWith("$ arduino-cli upload")) document.querySelector('.tab[data-tab="firmware"]').click();
+    if (ev.line.startsWith("$ arduino-cli upload") || ev.line.startsWith("$ ota upload")) document.querySelector('.tab[data-tab="firmware"]').click();
   });
   window.rc.onEvent("status", () => loadPorts().catch(() => {}));
 
   // start the bridge flash from the HA tab
-  window.rc.flashSketch = async (name) => {
+  window.rc.flashSketch = async (name, port) => {
     document.querySelector('.tab[data-tab="firmware"]').click();
-    await loadPorts();
     if (!sketches.length) await loadSketches();
     await selectSketch(name);
-    if (!$("fw-port").value) return toast("No board detected: plug the ESP32-S3 in first", true);
+    await loadPorts();
+    const sel = $("fw-port");
+    if (port) {
+      if (![...sel.options].some((o) => o.value === port)) return toast(`${port.replace(/^ota:/, "")} is not answering; cannot update over WiFi`, true);
+      sel.value = port; autoBoard(); updateButtons();
+    } else {
+      const usb = lastPorts.find((p) => p.board === "esp32s3") || lastPorts[0];
+      if (!usb) return toast("No board detected: plug the ESP32-S3 in first", true);
+      sel.value = usb.device; autoBoard(); updateButtons();
+    }
     $("fw-flash").click();
   };
 

@@ -75,19 +75,31 @@
       <label>Home Assistant URL<input id="ha-url" placeholder="http://homeassistant.local:8123"></label>
       <label>Long-lived access token<input id="ha-token" type="password" placeholder="(unchanged)"></label>
       <label>Receiver DAT pin on the ESP32-S3<input id="ha-pin" value="4" class="narrow"></label>
+      <label>Bridge address on your network<input id="ha-host" placeholder="rc-bridge.local" autocomplete="off"></label>
       <div class="row-btns">
         <button class="primary">Save settings</button>
         <button type="button" id="ha-test" class="ghost">Test Home Assistant</button>
         <button type="button" id="ha-load-entities" class="ghost">Load entities</button>
       </div>
     </form>
-    <p class="hint">Create the token in Home Assistant under your profile → Security → Long-lived access tokens. The WiFi password and token are stored only in the local database and written into the generated config.h at build time; neither is committed to git.</p>
+    <p class="hint">Create the token in Home Assistant under your profile → Security → Long-lived access tokens. The WiFi password and token are stored only in the local database and written into the generated config.h at build time; neither is committed to git. The bridge announces itself as <code>rc-bridge.local</code>; enter its IP instead if that name does not resolve on your network.</p>
+    <div class="col-head"><h2>Installed bridge</h2><span class="muted" id="bridge-host"></span></div>
+    <div id="bridge-card" class="bridge-card">
+      <div class="bridge-line"><span class="dot" id="bridge-dot"></span><span id="bridge-summary">checking…</span></div>
+      <div class="bridge-meta" id="bridge-meta"></div>
+      <div class="row-btns">
+        <button type="button" id="ha-ota" class="primary" disabled>Update over WiFi</button>
+        <button type="button" id="ha-flash" class="ghost">Flash over USB</button>
+        <button type="button" id="bridge-reboot" class="ghost" disabled>Reboot</button>
+        <button type="button" id="bridge-refresh" class="ghost" title="Probe the bridge again">↻</button>
+      </div>
+      <p class="hint">Once the bridge is running firmware 1.1.0 or newer it updates over WiFi: the server compiles the sketch with the current settings and mappings and pushes it to the bridge, which reboots into it. The very first install of that firmware has to go over USB.</p>
+    </div>
   </section>
   <section class="col">
     <div class="col-head"><h2>Button actions</h2>
       <div class="log-tools">
         <button id="ha-view-config" class="ghost small">View config.h</button>
-        <button id="ha-flash" class="primary small">Build &amp; flash bridge</button>
       </div>
     </div>
     <p class="hint">Map each saved button to what Home Assistant should do. <b>Run</b> calls the service from this computer so you can check the mapping before flashing.</p>

@@ -9,6 +9,8 @@
     $("ha-ssid").value = s.wifi_ssid || "";
     $("ha-url").value = s.ha_url || "";
     $("ha-pin").value = s.rx_pin || "4";
+    $("ha-host").value = s.bridge_host || "rc-bridge.local";
+    $("bridge-host").textContent = s.bridge_host || "rc-bridge.local";
     $("ha-wpass").placeholder = s.wifi_pass_set ? "(saved, leave blank to keep)" : "WiFi password";
     $("ha-token").placeholder = s.ha_token_set ? "(saved, leave blank to keep)" : "paste the long-lived token";
     $("ha-status").textContent = s.ha_url ? "" : "not configured";
@@ -18,9 +20,10 @@
     try {
       await api("/api/ha/settings", { method: "PUT", body: {
         wifi_ssid: $("ha-ssid").value, wifi_pass: $("ha-wpass").value, ha_url: $("ha-url").value.trim(),
-        ha_token: $("ha-token").value.trim(), rx_pin: $("ha-pin").value.trim() || "4" } });
+        ha_token: $("ha-token").value.trim(), rx_pin: $("ha-pin").value.trim() || "4",
+        bridge_host: $("ha-host").value.trim() || "rc-bridge.local" } });
       $("ha-wpass").value = ""; $("ha-token").value = "";
-      await loadSettings(); toast("Settings saved");
+      await loadSettings(); toast("Settings saved"); probeBridge();
     } catch (err) { toast(err.message, true); }
   };
   $("ha-test").onclick = async () => {
@@ -155,13 +158,63 @@
     w.document.write(`<pre style="font:12px/1.5 Menlo,monospace;background:#0b0e12;color:#e6e9ee;padding:16px;white-space:pre-wrap">${esc(text)}</pre>`);
     w.document.title = "config.h";
   };
-  $("ha-flash").onclick = async () => {
+  async function readyToFlash() {
     const s = await api("/api/ha/settings");
-    if (!s.wifi_ssid || !s.ha_url || !s.ha_token_set) return toast("Save WiFi SSID, Home Assistant URL and token first", true);
-    if (!Object.keys(actions).length && !confirm("No button actions mapped yet. Flash anyway?")) return;
-    window.rc.flashSketch("ha_bridge");
+    if (!s.wifi_ssid || !s.ha_url || !s.ha_token_set) { toast("Save WiFi SSID, Home Assistant URL and token first", true); return false; }
+    if (!Object.keys(actions).length && !confirm("No button actions mapped yet. Flash anyway?")) return false;
+    return true;
+  }
+  $("ha-flash").onclick = async () => { if (await readyToFlash()) window.rc.flashSketch("ha_bridge"); };
+  $("ha-ota").onclick = async () => {
+    if (!bridge || !bridge.online) return toast("The bridge is not answering; it cannot be updated over WiFi right now", true);
+    if (await readyToFlash()) window.rc.flashSketch("ha_bridge", bridge.ota_port);
   };
+  $("bridge-reboot").onclick = async () => {
+    if (!confirm("Reboot the bridge now?")) return;
+    try { await api("/api/bridge/reboot", { method: "POST" }); toast("Bridge is rebooting"); setTimeout(probeBridge, 4000); }
+    catch (err) { toast(err.message, true); }
+  };
+  $("bridge-refresh").onclick = () => probeBridge();
 
-  window.rc.onEvent("tab", (tab) => { if (tab === "ha") loadActions().then(() => entities.length || loadEntities(true)).catch(() => {}); });
+  // ---- installed bridge status ------------------------------------------------
+  let bridge = null, bridgeTimer = null;
+  const ago = (s) => s == null ? "" : s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`;
+  const up = (s) => s < 3600 ? `${Math.round(s / 60)} min` : s < 86400 ? `${(s / 3600).toFixed(1)} h` : `${(s / 86400).toFixed(1)} d`;
+  function renderBridge() {
+    const dot = $("bridge-dot"), sum = $("bridge-summary"), meta = $("bridge-meta");
+    if (!bridge) { dot.className = "dot"; sum.textContent = "checking…"; meta.textContent = ""; return; }
+    $("bridge-host").textContent = bridge.host;
+    if (bridge.pending) { dot.className = "dot"; sum.textContent = "checking…"; meta.textContent = ""; }
+    else if (!bridge.online) {
+      dot.className = "dot off"; sum.textContent = `offline: ${bridge.error || "no answer"}`;
+      meta.textContent = "Not reachable at this address. If the bridge is running an older firmware, flash it once over USB; otherwise check its power or set its IP above.";
+    } else {
+      dot.className = "dot on";
+      sum.textContent = `online · ha_bridge ${bridge.version} · ${bridge.ip}${bridge.ota ? "" : " · no OTA support, flash over USB"}`;
+      const last = bridge.last_button ? `last press: ${bridge.last_button} ${ago(bridge.last_press_ago_s)}` : "no presses yet";
+      meta.innerHTML = [
+        `WiFi ${esc(String(bridge.rssi))} dBm`, `up ${up(bridge.uptime_s)}`, `${bridge.buttons} buttons`,
+        `${bridge.presses} presses`, esc(last), `${bridge.latency_ms} ms`,
+      ].map((x) => `<span>${x}</span>`).join("");
+    }
+    $("ha-ota").disabled = !(bridge.online && bridge.ota);
+    $("bridge-reboot").disabled = !(bridge.online && bridge.ota);
+  }
+  async function probeBridge() {
+    try { bridge = await api("/api/bridge/status"); } catch (err) { bridge = { online: false, error: err.message, host: $("ha-host").value }; }
+    renderBridge();
+    window.rc.bridge = bridge;
+  }
+  function pollBridge(on) {
+    clearInterval(bridgeTimer); bridgeTimer = null;
+    if (on) { probeBridge(); bridgeTimer = setInterval(probeBridge, 5000); }
+  }
+
+  window.rc.onEvent("tab", (tab) => {
+    pollBridge(tab === "ha");
+    if (tab === "ha") loadActions().then(() => entities.length || loadEntities(true)).catch(() => {});
+  });
+  window.rc.onEvent("build", (ev) => { if (ev.done) setTimeout(probeBridge, 1500); });
   loadSettings().then(loadActions).then(() => loadEntities(true)).catch(() => {});
+  pollBridge(document.querySelector('.tab[data-tab="ha"]').classList.contains("active"));
 })();

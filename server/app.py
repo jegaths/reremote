@@ -25,6 +25,7 @@ from decoder import decode
 from matcher import match_capture
 import firmware as fw
 from ha import ACTIONS, HomeAssistant, action_to_call, generate_config_h
+import ota
 
 HERE = Path(__file__).parent
 DB_PATH = os.environ.get("RC_DB", str(HERE.parent / "data" / "remotes.sqlite"))
@@ -60,11 +61,20 @@ def _on_engine_event(ev: dict[str, Any]) -> None:
 engine = CaptureEngine(on_event=_on_engine_event)
 builder = fw.BuildRunner(on_event=hub.publish)
 
-SECRET_KEYS = ("ha_token", "wifi_pass")
+SECRET_KEYS = ("ha_token", "wifi_pass", "ota_token")
+
+
+def _settings() -> dict[str, str]:
+    """Stored settings plus defaults; makes sure the bridge has an OTA token."""
+    st = db.get_settings()
+    if not st.get("ota_token"):
+        st = db.set_settings({"ota_token": ota.new_token()})
+    st.setdefault("bridge_host", ota.DEFAULT_HOST)
+    return st
 
 
 def _public_settings() -> dict[str, Any]:
-    st = db.get_settings()
+    st = _settings()
     out: dict[str, Any] = {k: v for k, v in st.items() if k not in SECRET_KEYS}
     for k in SECRET_KEYS:
         out[k + "_set"] = bool(st.get(k))
@@ -81,7 +91,7 @@ def _write_generated_config(sketch: str) -> None:
     m = next((x for x in fw.list_sketches() if x["name"] == sketch), None)
     if not m or m.get("config") != "ha_bridge":
         return
-    text = generate_config_h(db.get_settings(), db.buttons_with_samples(), db.list_actions())
+    text = generate_config_h(_settings(), db.buttons_with_samples(), db.list_actions())
     (fw.sketch_dir(sketch) / "config.h").write_text(text)
 
 
@@ -95,6 +105,11 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="rc-capture", version="1.0.0", lifespan=lifespan)
+_server: Any = None     # the uvicorn Server when started via `python app.py`
+
+
+def _shutting_down() -> bool:
+    return bool(_server is not None and getattr(_server, "should_exit", False))
 
 
 # ---- static ------------------------------------------------------------------
@@ -197,14 +212,21 @@ async def api_events() -> StreamingResponse:
     q = hub.subscribe()
 
     async def gen():
+        # The stream ends by itself when the server is stopping; otherwise uvicorn
+        # would wait for the browser to close it before shutting down.
+        quiet = 0.0
         try:
             yield EventHub.format_sse({"type": "status", **engine.status()})
-            while True:
+            while not _shutting_down():
                 try:
-                    ev = await asyncio.wait_for(q.get(), timeout=15)
+                    ev = await asyncio.wait_for(q.get(), timeout=1)
+                    quiet = 0.0
                     yield EventHub.format_sse(ev)
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    quiet += 1
+                    if quiet >= 15:
+                        quiet = 0.0
+                        yield ": keepalive\n\n"
         finally:
             hub.unsubscribe(q)
 
@@ -467,6 +489,21 @@ async def api_build(body: BuildBody) -> dict[str, Any]:
     was_connected = engine.status()["connected"] and engine.source == "serial"
     port = body.port or (engine.port if engine.source == "serial" else None)
     engine_port = engine.port if engine.source == "serial" else None
+    over_the_air = fw.is_ota_port(port)
+
+    if over_the_air:
+        # compile here, push the binary to the bridge over WiFi; the serial port is not involved
+        st = _settings()
+        host, token = fw.ota_host(port), st["ota_token"]
+
+        def uploader(bin_path: Path, emit: Any) -> None:
+            ota.upload(host, token, bin_path, emit)
+
+        try:
+            return builder.start(body.sketch, body.board, body.action, port,
+                                 before=lambda: _write_generated_config(body.sketch), uploader=uploader)
+        except (ValueError, RuntimeError, FileNotFoundError) as e:
+            raise HTTPException(400, str(e))
 
     def before() -> None:
         _write_generated_config(body.sketch)
@@ -510,6 +547,7 @@ class SettingsPatch(BaseModel):
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
     rx_pin: Optional[str] = None
+    bridge_host: Optional[str] = None     # where the installed bridge answers, default rc-bridge.local
 
 
 class ActionBody(BaseModel):
@@ -531,6 +569,8 @@ async def api_ha_save_settings(body: SettingsPatch) -> dict[str, Any]:
     for k in SECRET_KEYS:
         if values.get(k) == "":
             values.pop(k)
+    if "bridge_host" in values:
+        values["bridge_host"] = ota.normalize_host(values["bridge_host"])
     db.set_settings(values)
     return _public_settings()
 
@@ -586,7 +626,53 @@ async def api_ha_run_action(button_id: int) -> dict[str, Any]:
 
 @app.get("/api/ha/config.h", response_class=PlainTextResponse)
 async def api_ha_config() -> str:
-    return generate_config_h(db.get_settings(), db.buttons_with_samples(), db.list_actions())
+    return generate_config_h(_settings(), db.buttons_with_samples(), db.list_actions())
+
+
+# ---- the installed bridge (over WiFi) -------------------------------------------
+_bridge_cache: dict[str, Any] = {"host": None, "until": 0.0, "info": None}
+_bridge_probe: Optional[asyncio.Future] = None
+
+
+async def _probe_bridge(host: str) -> dict[str, Any]:
+    """One probe at a time, results cached (3 s online, 20 s offline): a failed
+    mDNS lookup takes ~5 s on macOS and two pollers in the UI ask regularly."""
+    global _bridge_probe
+    if _bridge_cache["host"] == host and _bridge_cache["until"] > time.time():
+        return _bridge_cache["info"]
+    if _bridge_probe is None or _bridge_probe.done() or _bridge_probe.get_name() != host:
+        _bridge_probe = asyncio.ensure_future(asyncio.to_thread(ota.status, host))
+        _bridge_probe.set_name(host)
+    try:
+        info = await asyncio.wait_for(asyncio.shield(_bridge_probe), timeout=2.5)
+    except asyncio.TimeoutError:
+        return {"online": False, "host": host, "pending": True, "error": "still checking"}
+    _bridge_cache.update(host=host, info=info, until=time.time() + (3 if info.get("online") else 20))
+    return info
+
+
+@app.get("/api/bridge/status")
+async def api_bridge_status() -> dict[str, Any]:
+    """Probe the bridge at bridge_host; {"online": false, "error": ...} when it does not answer."""
+    host = _settings()["bridge_host"]
+    try:
+        info = dict(await _probe_bridge(host))
+    except asyncio.CancelledError:
+        if not _shutting_down():
+            raise
+        info = {"online": False, "host": host, "error": "server shutting down"}
+    info["ota_port"] = f"{fw.OTA_PREFIX}{info['host']}"
+    return info
+
+
+@app.post("/api/bridge/reboot")
+async def api_bridge_reboot() -> dict[str, bool]:
+    st = _settings()
+    try:
+        await asyncio.to_thread(ota.reboot, st["bridge_host"], st["ota_token"])
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"rebooting": True}
 
 
 # ---- captures / export -------------------------------------------------------
@@ -616,4 +702,11 @@ if __name__ == "__main__":
     args = ap.parse_args()
     if args.simulate:
         os.environ["RC_SIMULATE"] = "1"
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Run the Server object ourselves so the SSE streams can see should_exit and
+    # close on Ctrl-C; the grace timeout is a backstop for any other open request.
+    _server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port,
+                                            timeout_graceful_shutdown=3))
+    try:
+        _server.run()
+    except KeyboardInterrupt:
+        pass            # uvicorn re-raises the Ctrl-C after a clean shutdown
