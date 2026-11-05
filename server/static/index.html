@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RC Capture</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="dot" id="link-dot"></span>
+    <h1>RC Capture</h1>
+    <span class="sub">433 MHz remote code library</span>
+  </div>
+  <div class="conn">
+    <select id="port-select" title="Serial port"></select>
+    <button id="btn-refresh" class="ghost" title="Rescan ports">↻</button>
+    <button id="btn-connect" class="primary">Connect</button>
+    <button id="btn-sim" class="ghost" title="Run without hardware">Simulator</button>
+    <button id="btn-disconnect" class="ghost hidden">Disconnect</button>
+  </div>
+</header>
+
+<div class="statusbar" id="statusbar">
+  <span id="st-source">Not connected</span>
+  <span id="st-fw" class="muted"></span>
+  <span class="spacer"></span>
+  <label>frames <b id="st-frames">0</b></label>
+  <label>dropped as noise <b id="st-dropped">0</b></label>
+  <label title="Identical frames needed before a press is reported">min repeats
+    <input id="set-repeats" type="number" min="1" max="20" value="2"></label>
+  <label title="Quiet time that ends a press">settle ms
+    <input id="set-settle" type="number" min="50" max="5000" step="50" value="350"></label>
+</div>
+
+<main class="cols">
+  <section class="col">
+    <div class="col-head">
+      <h2>Live captures</h2>
+      <button id="btn-clear-feed" class="ghost small">Clear feed</button>
+    </div>
+    <p class="hint" id="feed-hint">Press a button on the remote. Each press shows up here once the same frame has been seen a couple of times.</p>
+    <div id="feed"></div>
+  </section>
+
+  <section class="col">
+    <div class="col-head">
+      <h2>Library</h2>
+      <a class="ghost small btn" href="/api/export" download>Export JSON</a>
+    </div>
+    <form id="remote-form" class="row">
+      <input id="remote-name" placeholder="New remote name (e.g. Crompton fan)" required>
+      <input id="remote-brand" placeholder="Brand" class="narrow">
+      <input id="remote-model" placeholder="Model" class="narrow">
+      <button class="primary">Add remote</button>
+    </form>
+    <div id="library"></div>
+  </section>
+</main>
+
+<section class="col log-panel" id="log-panel">
+  <div class="col-head">
+    <h2>Serial log <span class="muted" id="log-count"></span></h2>
+    <div class="log-tools">
+      <label><input type="checkbox" id="log-frames" checked> frames</label>
+      <label><input type="checkbox" id="log-scroll" checked> auto-scroll</label>
+      <form id="cmd-form" class="inline"><input id="cmd-input" placeholder="command to board, e.g. ?  G 3000" maxlength="20"><button class="ghost small">Send</button></form>
+      <button id="btn-log-pause" class="ghost small">Pause</button>
+      <button id="btn-log-clear" class="ghost small">Clear</button>
+    </div>
+  </div>
+  <pre id="log"></pre>
+</section>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
