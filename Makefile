@@ -16,12 +16,12 @@ VENV      := .venv
 PY        := $(VENV)/bin/python
 UV        := $(shell command -v uv 2>/dev/null)
 ARDUINO   := $(shell command -v arduino-cli 2>/dev/null)
-SKETCH    := firmware/rf_capture
 ESP32_URL := https://espressif.github.io/arduino-esp32/package_esp32_index.json
 HOST      ?= 127.0.0.1
 PORT_HTTP ?= 8000
 URL       := http://$(HOST):$(PORT_HTTP)
 
+SKETCH    ?= firmware/rf_capture      # or: make flash SKETCH=firmware/ha_bridge
 FQBN_esp32s3  := esp32:esp32:esp32s3:CDCOnBoot=cdc
 FQBN_nano     := arduino:avr:nano
 FQBN_nano-old := arduino:avr:nano:cpu=atmega328old
@@ -32,7 +32,7 @@ help:
 	@echo ""
 	@echo "rc-capture"
 	@echo "  make setup        install everything (python env, arduino-cli, Nano + ESP32 cores)"
-	@echo "  make flash        compile + upload firmware to the board that is plugged in"
+	@echo "  make flash        compile + upload firmware (SKETCH=firmware/ha_bridge for the bridge)"
 	@echo "  make run          start backend + UI at $(URL)"
 	@echo "  make sim          start with the simulator (no hardware needed)"
 	@echo "  make test         run tests"
@@ -71,7 +71,8 @@ setup-arduino:
 	@arduino-cli core update-index >/dev/null
 	@arduino-cli core list | grep -q '^arduino:avr' || arduino-cli core install arduino:avr
 	@arduino-cli core list | grep -q '^esp32:esp32' || arduino-cli core install esp32:esp32
-	@echo "✔ arduino-cli ready with Nano and ESP32 cores"
+	@arduino-cli lib list 2>/dev/null | grep -q '^rc-switch' || arduino-cli lib install rc-switch
+	@echo "✔ arduino-cli ready with Nano and ESP32 cores and the rc-switch library"
 
 # --------------------------------------------------------------------------- firmware
 # Auto-detect the port and board unless given on the command line
@@ -105,6 +106,8 @@ monitor:
 # --------------------------------------------------------------------------- server
 .PHONY: run sim test export
 run: setup-python
+	@echo "If macOS asks whether Python may find devices on your local network, click Allow:"
+	@echo "the Home Assistant tab needs it to reach HA on your LAN."
 	@( sleep 1.5; open $(URL) 2>/dev/null || true ) &
 	$(PY) server/app.py --host $(HOST) --port $(PORT_HTTP)
 

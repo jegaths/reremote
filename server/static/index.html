@@ -34,7 +34,13 @@
     <input id="set-settle" type="number" min="50" max="5000" step="50" value="350"></label>
 </div>
 
-<main class="cols">
+<nav class="tabs">
+  <button class="tab active" data-tab="capture">Capture</button>
+  <button class="tab" data-tab="ha">Home Assistant</button>
+  <button class="tab" data-tab="firmware">Firmware</button>
+</nav>
+
+<main class="cols tab-page" id="tab-capture">
   <section class="col">
     <div class="col-head">
       <h2>Live captures</h2>
@@ -59,6 +65,69 @@
   </section>
 </main>
 
+<!-- ============ Home Assistant tab ============ -->
+<main class="tab-page hidden" id="tab-ha">
+  <section class="col">
+    <div class="col-head"><h2>Connection</h2><span class="muted" id="ha-status"></span></div>
+    <form id="ha-form" class="grid2">
+      <label>WiFi network (SSID)<input id="ha-ssid" autocomplete="off"></label>
+      <label>WiFi password<input id="ha-wpass" type="password" placeholder="(unchanged)"></label>
+      <label>Home Assistant URL<input id="ha-url" placeholder="http://homeassistant.local:8123"></label>
+      <label>Long-lived access token<input id="ha-token" type="password" placeholder="(unchanged)"></label>
+      <label>Receiver DAT pin on the ESP32-S3<input id="ha-pin" value="4" class="narrow"></label>
+      <div class="row-btns">
+        <button class="primary">Save settings</button>
+        <button type="button" id="ha-test" class="ghost">Test Home Assistant</button>
+        <button type="button" id="ha-load-entities" class="ghost">Load entities</button>
+      </div>
+    </form>
+    <p class="hint">Create the token in Home Assistant under your profile → Security → Long-lived access tokens. The WiFi password and token are stored only in the local database and written into the generated config.h at build time; neither is committed to git.</p>
+  </section>
+  <section class="col">
+    <div class="col-head"><h2>Button actions</h2>
+      <div class="log-tools">
+        <button id="ha-view-config" class="ghost small">View config.h</button>
+        <button id="ha-flash" class="primary small">Build &amp; flash bridge</button>
+      </div>
+    </div>
+    <p class="hint">Map each saved button to what Home Assistant should do. <b>Run</b> calls the service from this computer so you can check the mapping before flashing.</p>
+    <div id="ha-actions"></div>
+  </section>
+</main>
+
+<!-- ============ Firmware tab ============ -->
+<main class="tab-page hidden" id="tab-firmware">
+  <section class="col fw-side">
+    <div class="col-head"><h2>Sketches</h2><button id="fw-new" class="ghost small">New sketch</button></div>
+    <div id="fw-list"></div>
+    <div class="fw-target">
+      <h3>Target</h3>
+      <label>Port<select id="fw-port"></select></label>
+      <label>Board<select id="fw-board"></select></label>
+      <div class="row-btns">
+        <button id="fw-compile" class="ghost">Compile</button>
+        <button id="fw-flash" class="primary">Flash</button>
+      </div>
+      <p class="hint" id="fw-hint"></p>
+    </div>
+  </section>
+  <section class="col fw-main">
+    <div class="col-head">
+      <div class="fw-files" id="fw-files"></div>
+      <div class="log-tools">
+        <button id="fw-add-file" class="ghost small">Add file</button>
+        <button id="fw-save" class="primary small" disabled>Save</button>
+      </div>
+    </div>
+    <div class="editor-wrap">
+      <pre class="gutter" id="fw-gutter"></pre>
+      <textarea id="fw-editor" spellcheck="false" wrap="off" placeholder="Pick a sketch on the left"></textarea>
+    </div>
+    <div class="col-head"><h3>Build output</h3><button id="fw-clear-out" class="ghost small">Clear</button></div>
+    <pre id="fw-output"></pre>
+  </section>
+</main>
+
 <section class="col log-panel" id="log-panel">
   <div class="col-head">
     <h2>Serial log <span class="muted" id="log-count"></span></h2>
@@ -75,5 +144,7 @@
 
 <div id="toast" class="toast hidden"></div>
 <script src="/static/app.js"></script>
+<script src="/static/firmware.js"></script>
+<script src="/static/ha.js"></script>
 </body>
 </html>

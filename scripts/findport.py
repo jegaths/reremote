@@ -8,14 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 from capture import list_serial_ports  # noqa: E402
-
-GUESS = [
-    ("ESP32-S3 native", "esp32s3"),
-    ("ESP32 dev board", "esp32s3"),
-    ("CH340", "nano-old"),      # CH340 clones nearly always ship the old bootloader
-    ("FTDI", "nano"),
-    ("Arduino", "nano"),
-]
+from firmware import guess_board  # noqa: E402
 
 
 def main() -> int:
@@ -31,7 +24,7 @@ def main() -> int:
         print("no board found: plug it in via USB and try again", file=sys.stderr)
         return 1
     p = ports[0]
-    board = next((b for key, b in GUESS if key.lower() in p["description"].lower()), "unknown")
+    board = guess_board(p["description"])
     if len(ports) > 1:
         print("several ports found, using the first; override with PORT=...: "
               + ", ".join(x["device"] for x in ports), file=sys.stderr)

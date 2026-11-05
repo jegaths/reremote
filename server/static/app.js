@@ -57,6 +57,7 @@
   }
   function renderStatus(s) {
     status = s;
+    window.dispatchEvent(new CustomEvent("rc:status", { detail: s }));
     const on = s.connected;
     $("link-dot").classList.toggle("on", on);
     $("btn-connect").classList.toggle("hidden", on);
@@ -141,6 +142,7 @@
     });
     es.addEventListener("capture", (e) => addCapture(JSON.parse(e.data)));
     es.addEventListener("log", (e) => { if (!logPaused) appendLog(JSON.parse(e.data)); });
+    es.addEventListener("build", (e) => window.dispatchEvent(new CustomEvent("rc:build", { detail: JSON.parse(e.data) })));
     es.addEventListener("error", (e) => { if (e.data) toast(JSON.parse(e.data).message, true); });
     es.onerror = () => { es.close(); setTimeout(connectEvents, 2000); };
   }
@@ -183,6 +185,7 @@
         <button class="primary do-save">Save</button>
       </div>`}`;
     feed.prepend(card);
+    if (c.id != null && c.id > feedMaxId) feedMaxId = c.id;
     while (feed.children.length > 60) feed.lastChild.remove();
     if (c.match) return;
 
@@ -238,7 +241,11 @@
     name.onkeydown = (e) => { if (e.key === "Enter") save(); };
   }
   function lastRemoteId() { try { return +localStorage.getItem("lastRemoteId") || null; } catch (_) { return null; } }
-  $("btn-clear-feed").onclick = () => { feed.innerHTML = ""; $("feed-hint").classList.remove("hidden"); };
+  let feedMaxId = 0;   // highest capture id shown; "Clear feed" hides everything up to it, also after a reload
+  $("btn-clear-feed").onclick = () => {
+    feed.innerHTML = ""; $("feed-hint").classList.remove("hidden");
+    try { localStorage.setItem("feedClearedAt", String(feedMaxId)); } catch (_) {}
+  };
 
   // ---------- library ---------------------------------------------------------
   async function loadLibrary() {
@@ -303,13 +310,32 @@
     } catch (err) { toast(err.message, true); }
   };
 
+  // ---------- tabs ------------------------------------------------------------
+  document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === t));
+    document.querySelectorAll(".tab-page").forEach((p) => p.classList.toggle("hidden", p.id !== "tab-" + t.dataset.tab));
+    try { localStorage.setItem("tab", t.dataset.tab); } catch (_) {}
+    window.dispatchEvent(new CustomEvent("rc:tab", { detail: t.dataset.tab }));
+  });
+  {
+    let want = (location.hash || "").slice(1);
+    if (!want) { try { want = localStorage.getItem("tab") || ""; } catch (_) {} }
+    if (want) document.querySelector(`.tab[data-tab="${want}"]`)?.click();
+  }
+
+  // shared helpers for firmware.js / ha.js
+  window.rc = { api, toast, esc, getStatus: () => status, getRemotes: () => remotes, getButtons: () => allButtons, loadLibrary,
+    onEvent: (name, fn) => window.addEventListener("rc:" + name, (e) => fn(e.detail)) };
+
   // ---------- boot ------------------------------------------------------------
   (async () => {
     try {
       await Promise.all([loadPorts(), loadLibrary()]);
       renderStatus(await api("/api/status"));
       // show recent captures from the DB so a page reload does not lose them
-      const recent = await api("/api/captures?limit=20");
+      let clearedAt = 0;
+      try { clearedAt = +localStorage.getItem("feedClearedAt") || 0; } catch (_) {}
+      const recent = (await api("/api/captures?limit=20")).filter((c) => c.id > clearedAt);
       recent.reverse().forEach((c) => addCapture({
         ...c, code_hex: c.code != null ? "0x" + c.code.toString(16).toUpperCase() : null,
         code_bin: c.code != null && c.bit_length ? c.code.toString(2).padStart(c.bit_length, "0") : null,

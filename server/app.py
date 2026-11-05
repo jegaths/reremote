@@ -10,11 +10,12 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,8 @@ from capture import CaptureEngine, EventHub, list_serial_ports
 from db import Database
 from decoder import decode
 from matcher import match_capture
+import firmware as fw
+from ha import ACTIONS, HomeAssistant, action_to_call, generate_config_h
 
 HERE = Path(__file__).parent
 DB_PATH = os.environ.get("RC_DB", str(HERE.parent / "data" / "remotes.sqlite"))
@@ -55,6 +58,31 @@ def _on_engine_event(ev: dict[str, Any]) -> None:
 
 
 engine = CaptureEngine(on_event=_on_engine_event)
+builder = fw.BuildRunner(on_event=hub.publish)
+
+SECRET_KEYS = ("ha_token", "wifi_pass")
+
+
+def _public_settings() -> dict[str, Any]:
+    st = db.get_settings()
+    out: dict[str, Any] = {k: v for k, v in st.items() if k not in SECRET_KEYS}
+    for k in SECRET_KEYS:
+        out[k + "_set"] = bool(st.get(k))
+    return out
+
+
+def _ha() -> HomeAssistant:
+    st = db.get_settings()
+    return HomeAssistant(st.get("ha_url", ""), st.get("ha_token", ""))
+
+
+def _write_generated_config(sketch: str) -> None:
+    """Regenerate config.h for sketches that declare a config generator."""
+    m = next((x for x in fw.list_sketches() if x["name"] == sketch), None)
+    if not m or m.get("config") != "ha_bridge":
+        return
+    text = generate_config_h(db.get_settings(), db.buttons_with_samples(), db.list_actions())
+    (fw.sketch_dir(sketch) / "config.h").write_text(text)
 
 
 @asynccontextmanager
@@ -86,7 +114,10 @@ class ConnectBody(BaseModel):
 
 @app.get("/api/ports")
 async def api_ports() -> list[dict[str, str]]:
-    return list_serial_ports()
+    ports = list_serial_ports()
+    for p in ports:
+        p["board"] = fw.guess_board(p["description"])
+    return ports
 
 
 @app.get("/api/status")
@@ -94,10 +125,29 @@ async def api_status() -> dict[str, Any]:
     return engine.status()
 
 
+def _connect_with_retry(port: str, baud: int, attempts: int = 3) -> None:
+    """The ESP32-S3's native USB port often drops the very first open after
+    another process released it; a second try a moment later succeeds."""
+    last: Optional[Exception] = None
+    for i in range(attempts):
+        try:
+            engine.connect(port, baud)
+        except Exception as e:  # noqa: BLE001
+            last = e
+            time.sleep(0.7)
+            continue
+        time.sleep(0.8)
+        if engine.status()["connected"]:
+            return
+        last = RuntimeError("port closed right after opening")
+        time.sleep(0.5)
+    raise last or RuntimeError("could not connect")
+
+
 @app.post("/api/connect")
 async def api_connect(body: ConnectBody) -> dict[str, Any]:
     try:
-        await asyncio.to_thread(engine.connect, body.port, body.baud)
+        await asyncio.to_thread(_connect_with_retry, body.port, body.baud)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"could not open {body.port}: {e}") from e
     return engine.status()
@@ -337,6 +387,206 @@ async def api_log(limit: int = 500, frames: bool = True) -> list[dict[str, Any]]
 async def api_clear_log() -> dict[str, bool]:
     engine.log.clear()
     return {"cleared": True}
+
+
+# ---- firmware: sketches, files, builds --------------------------------------
+class SketchBody(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    title: str = ""
+    description: str = ""
+    copy_from: Optional[str] = None
+
+
+class FileBody(BaseModel):
+    content: str
+
+
+class BuildBody(BaseModel):
+    sketch: str
+    board: str
+    action: str = "flash"          # compile | flash
+    port: Optional[str] = None
+    reconnect: bool = True         # reopen the serial port in the capture engine afterwards
+
+
+@app.get("/api/firmware")
+async def api_sketches() -> dict[str, Any]:
+    return {"sketches": fw.list_sketches(), "boards": fw.BOARD_LABEL,
+            "arduino_cli": bool(fw.arduino_cli()), "building": builder.current}
+
+
+@app.post("/api/firmware", status_code=201)
+async def api_create_sketch(body: SketchBody) -> dict[str, Any]:
+    try:
+        return fw.create_sketch(body.name, body.title, body.description, body.copy_from)
+    except FileExistsError:
+        raise HTTPException(409, "a sketch with that name already exists")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/firmware/{sketch}")
+async def api_delete_sketch(sketch: str) -> dict[str, bool]:
+    try:
+        fw.delete_sketch(sketch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"deleted": True}
+
+
+@app.get("/api/firmware/{sketch}/files/{filename}", response_class=PlainTextResponse)
+async def api_read_file(sketch: str, filename: str) -> str:
+    try:
+        if filename == "config.h":
+            _write_generated_config(sketch)   # show what the next build will use
+        return fw.read_file(sketch, filename)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(404, str(e))
+
+
+@app.put("/api/firmware/{sketch}/files/{filename}")
+async def api_write_file(sketch: str, filename: str, body: FileBody) -> dict[str, Any]:
+    try:
+        fw.write_file(sketch, filename, body.content)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    return {"saved": filename, "files": fw.sketch_files(sketch)}
+
+
+@app.delete("/api/firmware/{sketch}/files/{filename}")
+async def api_delete_file(sketch: str, filename: str) -> dict[str, Any]:
+    try:
+        fw.delete_file(sketch, filename)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"deleted": filename, "files": fw.sketch_files(sketch)}
+
+
+@app.post("/api/firmware/build")
+async def api_build(body: BuildBody) -> dict[str, Any]:
+    was_connected = engine.status()["connected"] and engine.source == "serial"
+    port = body.port or (engine.port if engine.source == "serial" else None)
+    engine_port = engine.port if engine.source == "serial" else None
+
+    def before() -> None:
+        _write_generated_config(body.sketch)
+        if body.action == "flash" and engine.source == "serial":
+            engine.disconnect()           # esptool needs the port to itself
+            time.sleep(0.5)
+
+    def after(ok: bool) -> None:
+        if body.action != "flash" or not body.reconnect:
+            return
+        target = port or engine_port
+        if not target:
+            return
+        # the board re-enumerates after a flash; give it a moment, retry a few times
+        for _ in range(6):
+            time.sleep(1.5)
+            try:
+                _connect_with_retry(target, 115200, attempts=2)
+                return
+            except Exception:  # noqa: BLE001
+                continue
+        hub.publish({"type": "error", "message": f"could not reopen {target} after flashing"})
+
+    try:
+        job = builder.start(body.sketch, body.board, body.action, port,
+                            before=before, after=after if (was_connected or body.port) else None)
+    except (ValueError, RuntimeError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+    return job
+
+
+@app.get("/api/firmware/build/status")
+async def api_build_status() -> dict[str, Any]:
+    return {"current": builder.current, "history": builder.history[-10:]}
+
+
+# ---- Home Assistant ------------------------------------------------------------
+class SettingsPatch(BaseModel):
+    wifi_ssid: Optional[str] = None
+    wifi_pass: Optional[str] = None
+    ha_url: Optional[str] = None
+    ha_token: Optional[str] = None
+    rx_pin: Optional[str] = None
+
+
+class ActionBody(BaseModel):
+    domain: str
+    service: str
+    entity_id: str
+    data: dict[str, Any] = {}
+
+
+@app.get("/api/ha/settings")
+async def api_ha_settings() -> dict[str, Any]:
+    return _public_settings()
+
+
+@app.put("/api/ha/settings")
+async def api_ha_save_settings(body: SettingsPatch) -> dict[str, Any]:
+    values = {k: v for k, v in body.model_dump().items() if v is not None}
+    # empty secret means "keep the stored one"
+    for k in SECRET_KEYS:
+        if values.get(k) == "":
+            values.pop(k)
+    db.set_settings(values)
+    return _public_settings()
+
+
+@app.post("/api/ha/test")
+async def api_ha_test() -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(_ha().ping)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/ha/entities")
+async def api_ha_entities() -> dict[str, Any]:
+    try:
+        ents = await asyncio.to_thread(_ha().entities)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"entities": ents, "actions": ACTIONS}
+
+
+@app.get("/api/ha/actions")
+async def api_ha_actions() -> dict[str, Any]:
+    return {"actions": {str(k): v for k, v in db.list_actions().items()}, "catalog": ACTIONS}
+
+
+@app.put("/api/ha/actions/{button_id}")
+async def api_ha_set_action(button_id: int, body: ActionBody) -> dict[str, Any]:
+    if not db.get_button(button_id):
+        raise HTTPException(404, "button not found")
+    if body.domain not in ACTIONS:
+        raise HTTPException(400, f"unsupported domain {body.domain}")
+    return db.set_action(button_id, body.domain, body.service, body.entity_id, body.data)
+
+
+@app.delete("/api/ha/actions/{button_id}")
+async def api_ha_delete_action(button_id: int) -> dict[str, bool]:
+    return {"deleted": db.delete_action(button_id)}
+
+
+@app.post("/api/ha/actions/{button_id}/run")
+async def api_ha_run_action(button_id: int) -> dict[str, Any]:
+    act = db.list_actions().get(button_id)
+    if not act:
+        raise HTTPException(404, "no action mapped to this button")
+    path, data = action_to_call(act)
+    try:
+        result = await asyncio.to_thread(_ha().call, act["domain"], act["service"], data)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    return {"called": path, "data": data, "changed": len(result or [])}
+
+
+@app.get("/api/ha/config.h", response_class=PlainTextResponse)
+async def api_ha_config() -> str:
+    return generate_config_h(db.get_settings(), db.buttons_with_samples(), db.list_actions())
 
 
 # ---- captures / export -------------------------------------------------------

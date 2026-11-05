@@ -5,3 +5,5 @@ __pycache__/
 data/
 firmware/**/build/
 .DS_Store
+
+firmware/*/config.h

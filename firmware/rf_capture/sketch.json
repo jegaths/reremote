@@ -1,0 +1,6 @@
+{
+  "title": "RF capture",
+  "description": "Streams raw pulse timings of every 433 MHz frame over USB serial for the capture UI. Arduino Nano and ESP32-S3.",
+  "boards": ["esp32s3", "nano", "nano-old"],
+  "libraries": []
+}

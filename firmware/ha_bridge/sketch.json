@@ -1,0 +1,8 @@
+{
+  "title": "Home Assistant bridge",
+  "description": "Listens to the 433 MHz remote, recognises the buttons saved in the library and calls Home Assistant services over WiFi. ESP32-S3 only.",
+  "boards": ["esp32s3"],
+  "libraries": ["rc-switch"],
+  "config": "ha_bridge",
+  "generated": ["config.h"]
+}

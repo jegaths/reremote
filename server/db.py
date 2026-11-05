@@ -57,6 +57,20 @@ CREATE TABLE IF NOT EXISTS button_samples (
     captured_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS button_actions (
+    button_id  INTEGER PRIMARY KEY REFERENCES buttons(id) ON DELETE CASCADE,
+    domain     TEXT NOT NULL,
+    service    TEXT NOT NULL,
+    entity_id  TEXT NOT NULL,
+    data       TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_buttons_fp ON buttons(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_samples_btn ON button_samples(button_id);
 CREATE INDEX IF NOT EXISTS idx_captures_at ON captures(captured_at);
@@ -259,3 +273,41 @@ class Database:
                 b["samples"] = [{"code": smp["code"], "timings": smp["timings"], "captured_at": smp["captured_at"]}
                                 for smp in self.list_samples(b["id"])]
         return {"exported_at": now_iso(), "remotes": remotes}
+
+    # ---- settings ----------------------------------------------------------
+    def get_settings(self) -> dict[str, str]:
+        return {r["key"]: r["value"] for r in self._rows("SELECT key, value FROM settings")}
+
+    def set_settings(self, values: dict[str, str]) -> dict[str, str]:
+        with self._lock, self._conn:
+            for k, v in values.items():
+                if v is None:
+                    continue
+                self._conn.execute(
+                    "INSERT INTO settings(key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (k, str(v)))
+        return self.get_settings()
+
+    # ---- button actions ----------------------------------------------------
+    def list_actions(self) -> dict[int, dict[str, Any]]:
+        out = {}
+        for r in self._rows("SELECT * FROM button_actions"):
+            r["data"] = json.loads(r["data"]) if r.get("data") else {}
+            out[r["button_id"]] = r
+        return out
+
+    def set_action(self, button_id: int, domain: str, service: str, entity_id: str,
+                   data: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO button_actions(button_id, domain, service, entity_id, data, updated_at)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(button_id) DO UPDATE SET domain=excluded.domain, service=excluded.service,
+                       entity_id=excluded.entity_id, data=excluded.data, updated_at=excluded.updated_at""",
+                (button_id, domain, service, entity_id, json.dumps(data or {}), now_iso()))
+        return self.list_actions()[button_id]
+
+    def delete_action(self, button_id: int) -> bool:
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM button_actions WHERE button_id = ?", (button_id,))
+            return cur.rowcount > 0

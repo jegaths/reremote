@@ -245,6 +245,12 @@ The database lives in `data/remotes.sqlite` (override with `RC_DB=`).
 | GET/POST/PATCH/DELETE | `/api/buttons[/{id}]` | buttons (`POST` takes `capture_id` or raw `timings`) |
 | GET/POST | `/api/buttons/{id}/samples` | presses a button has learned from; `POST` teaches another (`capture_id` or `timings`) |
 | GET/DELETE | `/api/log` | serial log ring buffer (`?frames=false` hides frame lines) |
+| GET/POST/DELETE | `/api/firmware[/{sketch}]` | sketches; files under `/api/firmware/{sketch}/files/{name}` (GET/PUT/DELETE) |
+| POST | `/api/firmware/build` `{sketch, board, action, port}` | compile or flash; output streams as `build` SSE events |
+| GET/PUT | `/api/ha/settings` | WiFi + Home Assistant settings (secrets never returned) |
+| POST | `/api/ha/test`, GET `/api/ha/entities` | reach Home Assistant, list controllable entities |
+| GET/PUT/DELETE | `/api/ha/actions[/{button_id}]`, POST `.../run` | button → service mappings, run one now |
+| GET | `/api/ha/config.h` | the generated bridge config |
 | GET/DELETE | `/api/captures` | raw capture log |
 | GET | `/api/export` | full JSON dump |
 
@@ -253,6 +259,59 @@ The database lives in `data/remotes.sqlite` (override with `RC_DB=`).
 ```sh
 cd server && ../.venv/bin/python -m pytest -q tests
 ```
+
+## Home Assistant bridge (flash from the UI)
+
+Once the buttons are in the library, the **Home Assistant** tab turns the
+ESP32-S3 into a standalone bridge: it listens to the remote, recognises the
+buttons with the same masks the library learned, and calls Home Assistant
+services over WiFi. The laptop is not needed after flashing.
+
+1. **Home Assistant tab → Connection.** Enter the WiFi SSID and password, the
+   Home Assistant URL (e.g. `http://homeassistant.local:8123`) and a
+   long-lived access token (HA profile → Security → Long-lived access tokens).
+   Save, then **Test Home Assistant** should report your HA name and version.
+2. **Load entities** pulls your fans, lights, switches, scenes and scripts.
+   For each button pick an entity and an action: turn on/off, toggle, set fan
+   speed %, speed up/down, brightness %. Each row saves itself. **Run** calls
+   the service from the server right away, so you can confirm the mapping
+   before anything is flashed.
+3. **Build & flash bridge.** The server regenerates `firmware/ha_bridge/config.h`
+   from the settings and the mappings (WiFi password and token included, which
+   is why that file is gitignored), compiles the `ha_bridge` sketch, frees the
+   serial port, uploads, and reconnects. The bridge's log then appears in the
+   Serial log panel: `W` WiFi status and IP, `R` every decoded frame, `M`
+   matched presses with the HTTP status Home Assistant returned.
+
+**"cannot reach … No route to host" on macOS** although the browser opens the
+same URL: macOS blocks local-network access for apps that have not been
+granted *Local Network* permission, and reports it as "No route to host".
+Start the server from your own Terminal with `make run` and click **Allow**
+when macOS asks whether Python may find devices on the local network. If the
+prompt never appeared, enable it by hand under System Settings → Privacy &
+Security → Local Network for your terminal app, then restart `make run`.
+Servers started from a background process cannot receive the prompt and stay
+blocked. The ESP32 is unaffected: it talks to Home Assistant over WiFi itself.
+
+On the board, a held button repeats the same code; identical codes within
+700 ms are treated as one press and each button has a 300 ms cooldown. Buttons
+with learned masks match on their stable bits, so the Crompton counter byte is
+ignored exactly as in the UI.
+
+To capture more buttons later, flash `rf_capture` back from the Firmware tab,
+capture, then flash `ha_bridge` again. Raw-timing buttons (not decodable by
+rc-switch) are left out of the bridge; only rc-switch protocols run on the board.
+
+## Firmware tab
+
+Every folder under `firmware/` with a `.ino` of the same name is a sketch.
+The Firmware tab lists them, opens their files in an editor (Cmd/Ctrl-S
+saves), creates new sketches (empty or a copy of `rf_capture`), and compiles or
+flashes to the detected port and board with arduino-cli's output streamed into
+the page. A `sketch.json` manifest sets the title, description, allowed boards
+and required libraries, which are installed before the build. Files listed
+under `generated` (the bridge's `config.h`) are rewritten before each build and
+shown read-only.
 
 ## Things to know before trusting a capture
 
@@ -272,20 +331,23 @@ cd server && ../.venv/bin/python -m pytest -q tests
 ## Layout
 
 ```
-firmware/rf_capture/rf_capture.ino   sketch for Nano and ESP32-S3
+firmware/rf_capture/                 capture sketch for Nano and ESP32-S3
+firmware/ha_bridge/                  ESP32-S3 sketch: remote -> Home Assistant over WiFi
 server/app.py                        FastAPI app + CLI entry point
 server/capture.py                    serial thread, burst grouping, SSE hub
 server/decoder.py                    rc-switch protocol table, raw fingerprint
+server/matcher.py                    sample-based button recognition (stable-bit masks)
+server/firmware.py                   sketch files, arduino-cli build/flash runner
+server/ha.py                         Home Assistant REST client, config.h generator
 server/db.py                         SQLite schema and queries
 server/simulator.py                  fake Arduino for development
-server/static/                       index.html, style.css, app.js
+server/static/                       index.html, style.css, app.js, firmware.js, ha.js
 server/tests/                        pytest suite
 ```
 
 ## Next steps
 
 1. Flash, connect, capture the Crompton remote, save its buttons.
-2. Add a 433 MHz transmitter (FS1000A / SYN115) and a replay endpoint that
-   turns a saved button back into pulses.
-3. Bridge to Home Assistant: an MQTT publisher that turns recognised presses
-   into `fan.set_percentage` / `light.toggle` service calls.
+2. Map buttons on the Home Assistant tab and flash the bridge.
+3. Optional: a 433 MHz transmitter and a replay endpoint, so Home Assistant can
+   also drive the fan's own receiver (the counter byte must change per send).
