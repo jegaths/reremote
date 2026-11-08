@@ -43,8 +43,9 @@ remote ──433 MHz──> receiver ──> ESP32 bridge ──WiFi──> Home
 |------|-------|--------------|
 | Any WiFi ESP32 dev board (ESP32, S2, S3, C3, C6) **or** an Arduino Nano | An ESP32 is needed for the WiFi Home Assistant bridge; a Nano can only capture | $3–8 |
 | 433 MHz receiver (RXB6, RW-54, SRX882 or similar superheterodyne module) | Avoid the cheap green "XY-MK-5V" regenerative boards if you can; they are very noisy | $1–3 |
-| 17.3 cm piece of straight wire | Antenna. **Don't skip it.** | — |
-| Breadboard + 3 jumper wires, USB data cable | | — |
+| 17.3 cm piece of straight wire (optional) | Antenna. Not needed with the remote in the same room; add it if range is poor | — |
+| USB **data** cable | Needed to flash the board and to capture. Charge-only cables don't work. After the bridge is installed, updates go over WiFi | — |
+| Breadboard + 3 jumper wires (optional) | Or solder the receiver straight to the board | — |
 
 **For the Home Assistant part** you also need a running
 [Home Assistant](https://www.home-assistant.io/) instance on the same network,
@@ -61,7 +62,7 @@ Wiring (full details and pin notes in [docs/hardware.md](docs/hardware.md)):
 | VCC | 3V3 | 5V |
 | GND | GND | GND |
 | DAT | GPIO 4 | D2 |
-| ANT | 17.3 cm wire | 17.3 cm wire |
+| ANT (optional) | 17.3 cm wire | 17.3 cm wire |
 
 ## Quick start
 
@@ -115,8 +116,8 @@ has the same board picker.
 
 | Symptom | Likely cause |
 |---------|--------------|
-| Frame counter never moves, even with the remote touching the antenna | The remote is not on 433 MHz (many newer fan remotes use 2.4 GHz). See [Limitations](#limitations). |
-| Counter ticks but no cards appear | Move the antenna away from the laptop and USB cable; set `min repeats` to 1 to see raw frames. |
+| Frame counter never moves, even with the remote right next to the receiver | The remote is not on 433 MHz (many newer fan remotes use 2.4 GHz). See [Limitations](#limitations). |
+| Counter ticks but no cards appear, or only at short range | Move the receiver away from the laptop and USB cable, add a 17.3 cm wire antenna, and set `min repeats` to 1 to see raw frames. |
 | Every press of the same button shows a different code | The remote uses a counter or a rolling code. Use **same as: <button>** to teach a second press ([details](docs/how-it-works.md#remotes-that-change-the-code-on-every-press)). |
 | ESP32 flash ends with "Failed to connect" | Hold **BOOT**, tap **RESET**, release BOOT, then run `make flash` again. On boards with two USB sockets, use the native USB one. |
 | Flash says the chip is a different ESP32 type | The board was guessed wrong. Pass `BOARD=` (e.g. `BOARD=esp32c3`) or pick the board in the Firmware tab. |

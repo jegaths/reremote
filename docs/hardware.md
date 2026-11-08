@@ -10,7 +10,9 @@ ESP32-C6**. All of them have WiFi, use 3.3 V logic and default to **GPIO 4**
 for the receiver. Only the ESP32-S3 has been tested on real hardware so far.
 The others compile from the same sketches.
 
-**Unplug USB before touching any jumper.**
+Use a breadboard and jumper wires, or solder the three wires directly.
+
+**Unplug USB before changing any wiring.**
 
 ## Option A: Arduino Nano
 
@@ -19,7 +21,7 @@ The others compile from the same sketches.
 | VCC          | 5V       |
 | GND          | GND      |
 | DAT          | D2       |
-| ANT          | 17.3 cm straight wire |
+| ANT          | optional: 17.3 cm straight wire |
 
 ## Option B: any ESP32
 
@@ -28,7 +30,7 @@ The others compile from the same sketches.
 | VCC          | **3V3** (not 5V / VBUS, see below) |
 | GND          | GND          |
 | DAT          | GPIO 4       |
-| ANT          | 17.3 cm straight wire |
+| ANT          | optional: 17.3 cm straight wire |
 
 ESP32 chips use 3.3 V logic, and their GPIOs are not 5 V tolerant. Powering
 the receiver from 3V3 keeps the DAT line at 3.3 V. If range is poor at 3.3 V,
@@ -47,11 +49,12 @@ Home Assistant tab). Avoid the pins that affect booting, USB or flash:
 
 Eight-pin receivers (RXB6 / RXB12 layout: `GND DAT NC VCC` on one side,
 `VCC GND GND ANT` on the other) have duplicated supply pins. Connect one VCC,
-one GND, DAT and ANT, and leave the rest empty.
+one GND and DAT (plus ANT if you add an antenna), and leave the rest empty.
 
-**The antenna matters more than anything else.** Without one, the receiver
-only picks up the remote within a few centimetres and reports mostly noise.
-A straight 17.3 cm wire (a quarter wavelength at 433.92 MHz) is enough.
+**The antenna is optional.** Most receiver modules pick up a remote in the
+same room without one. If captures only work up close, or you see mostly
+noise, solder or push a straight 17.3 cm wire (a quarter wavelength at
+433.92 MHz) into the ANT pin; it greatly improves range.
 
 ## First run, step by step (ESP32)
 

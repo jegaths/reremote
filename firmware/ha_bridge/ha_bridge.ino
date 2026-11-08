@@ -15,7 +15,7 @@
  *   POST /reboot            restart                          (header X-OTA-Token)
  * It announces itself on the LAN as <HOSTNAME>.local (mDNS).
  *
- * Wiring: receiver VCC -> 3V3, GND -> GND, DAT -> GPIO RX_PIN (config.h), antenna 17.3 cm.
+ * Wiring: receiver VCC -> 3V3, GND -> GND, DAT -> GPIO RX_PIN (config.h), optional 17.3 cm antenna.
  *
  * Serial (115200) prints one line per event so the capture UI's
  * Serial log can follow along:

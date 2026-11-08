@@ -14,7 +14,7 @@
  *   receiver GND  -> GND
  *   receiver DATA -> GPIO 4    (change RX_PIN below if you prefer another pin)
  *
- * Both: antenna -> 17.3 cm straight wire on the ANT pad (quarter wave @ 433.92 MHz)
+ * Both, optional: antenna -> 17.3 cm straight wire on the ANT pad (quarter wave @ 433.92 MHz)
  *
  * Boards with native USB (S2/S3/C3/C6) often have two USB sockets. Built with
  * "USB CDC On Boot: Enabled", this sketch mirrors its output to both the
