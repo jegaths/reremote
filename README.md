@@ -2,17 +2,17 @@
 
 **Turn any old 433 MHz remote into a Home Assistant controller. No YAML, no MQTT broker.**
 
-Plug a cheap ESP32-S3 or Arduino Nano with a 433 MHz receiver into your
+Plug a cheap ESP32 or Arduino Nano with a 433 MHz receiver into your
 computer, press the buttons on your fan, light or plug-socket remote, and give
 each one a name in the browser. Then map the buttons to Home Assistant
 entities and flash the board as a standalone WiFi bridge, from the same page.
 
 ```
-remote ──433 MHz──> receiver ──> ESP32-S3 / Nano ──USB──> ReRemote (browser UI)
+remote ──433 MHz──> receiver ──> ESP32 / Nano ──USB──> ReRemote (browser UI)
                                                                │
                                      map buttons to HA entities, flash over USB/WiFi
                                                                ▼
-remote ──433 MHz──> receiver ──> ESP32-S3 bridge ──WiFi──> Home Assistant
+remote ──433 MHz──> receiver ──> ESP32 bridge ──WiFi──> Home Assistant
 ```
 
 <!-- TODO: add a screenshot or GIF of a capture card and the Home Assistant tab here -->
@@ -41,7 +41,7 @@ remote ──433 MHz──> receiver ──> ESP32-S3 bridge ──WiFi──> H
 
 | Part | Notes | Approx. cost |
 |------|-------|--------------|
-| ESP32-S3 dev board **or** Arduino Nano | The ESP32-S3 is needed for the WiFi Home Assistant bridge; a Nano can only capture | $3–8 |
+| Any WiFi ESP32 dev board (ESP32, S2, S3, C3, C6) **or** an Arduino Nano | An ESP32 is needed for the WiFi Home Assistant bridge; a Nano can only capture | $3–8 |
 | 433 MHz receiver (RXB6, RW-54, SRX882 or similar superheterodyne module) | Avoid the cheap green "XY-MK-5V" regenerative boards if you can; they are very noisy | $1–3 |
 | 17.3 cm piece of straight wire | Antenna. **Don't skip it.** | — |
 | Breadboard + 3 jumper wires, USB data cable | | — |
@@ -56,7 +56,7 @@ building the button library work without Home Assistant.
 
 Wiring (full details and pin notes in [docs/hardware.md](docs/hardware.md)):
 
-| Receiver | ESP32-S3 | Arduino Nano |
+| Receiver | Any ESP32 | Arduino Nano |
 |----------|----------|--------------|
 | VCC | 3V3 | 5V |
 | GND | GND | GND |
@@ -92,8 +92,11 @@ Then in the browser:
    ([guide](docs/home-assistant.md)) to map each button to an entity that
    already exists in your Home Assistant.
 
-`make help` lists every command. Override the auto-detection with
-`make flash BOARD=esp32s3|nano|nano-old PORT=/dev/ttyACM0`.
+`make help` lists every command. The board type is guessed from USB. For an
+ESP32-S2, C3 or C6, or if the guess is wrong, name it:
+`make flash BOARD=esp32|esp32s2|esp32s3|esp32c3|esp32c6|nano|nano-old`
+(add `PORT=/dev/ttyACM0` to pick the port). In the browser, the Firmware tab
+has the same board picker.
 
 ### Platform notes
 
@@ -115,7 +118,8 @@ Then in the browser:
 | Frame counter never moves, even with the remote touching the antenna | The remote is not on 433 MHz (many newer fan remotes use 2.4 GHz). See [Limitations](#limitations). |
 | Counter ticks but no cards appear | Move the antenna away from the laptop and USB cable; set `min repeats` to 1 to see raw frames. |
 | Every press of the same button shows a different code | The remote uses a counter or a rolling code. Use **same as: <button>** to teach a second press ([details](docs/how-it-works.md#remotes-that-change-the-code-on-every-press)). |
-| ESP32-S3 flash ends with "Failed to connect" | Hold **BOOT**, tap **RESET**, release BOOT, then run `make flash` again. Use the board's native USB socket. |
+| ESP32 flash ends with "Failed to connect" | Hold **BOOT**, tap **RESET**, release BOOT, then run `make flash` again. On boards with two USB sockets, use the native USB one. |
+| Flash says the chip is a different ESP32 type | The board was guessed wrong. Pass `BOARD=` (e.g. `BOARD=esp32c3`) or pick the board in the Firmware tab. |
 | No serial port is listed | Try another cable (many are charge-only) or the other USB socket. On Linux, check the `dialout` group. |
 
 More detail is in [docs/hardware.md](docs/hardware.md).
@@ -134,8 +138,10 @@ Please read these before buying parts:
 - **Receive only.** The bridge listens to your remote and calls Home
   Assistant. It does not transmit yet, so Home Assistant cannot drive the
   original device's own receiver.
-- **The Home Assistant bridge is ESP32-S3 only.** The Nano works for capturing.
-  Other ESP32 variants will probably work but haven't been tested.
+- **The Home Assistant bridge needs an ESP32 with WiFi.** It builds for the
+  ESP32, S2, S3, C3 and C6. It has been tested on real hardware only on the
+  **ESP32-S3** so far; reports for the other chips are welcome. ESP8266 and
+  the ESP32-H2 (no WiFi) are not supported. The Nano works for capturing.
 - **Raw-timing buttons** (codes the rc-switch table can't decode) are stored in
   the library but are left out of the bridge firmware.
 - Only use it with remotes and devices you own.
@@ -152,7 +158,8 @@ Ideas, roughly in order:
 - [ ] **Other bands:** 315 MHz and 868 MHz receivers
 - [ ] **Export to ESPHome YAML** for people who already run ESPHome
 - [ ] **Several bridges** around the house, managed from one page
-- [ ] More boards (ESP32, ESP32-C3, ESP8266) and a pre-built Windows setup
+- [ ] Confirmed hardware tests on ESP32, S2, C3 and C6; ESP8266 support; a
+      pre-built Windows setup
 - [ ] Home Assistant add-on packaging
 
 Have a remote that doesn't work, or an idea? Please

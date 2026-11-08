@@ -113,8 +113,8 @@ def test_bridge_api(tmp_path, monkeypatch, fake_bridge):
         assert st["online"] and st["version"] == "1.1.0" and st["ota_port"] == f"ota:{fake_bridge}"
         assert '#define OTA_TOKEN "%s"' % token in c.get("/api/ha/config.h").text
         assert c.post("/api/bridge/reboot").status_code == 200
-        # OTA target is ESP32-S3 and ha_bridge only
+        # OTA target must be an ESP32 (any variant), never the Nano
         r = c.post("/api/firmware/build", json={"sketch": "ha_bridge", "board": "nano", "action": "flash", "port": f"ota:{fake_bridge}"})
-        assert r.status_code == 400 and "ESP32-S3" in r.json()["detail"]
+        assert r.status_code == 400 and "ESP32" in r.json()["detail"]
         r = c.post("/api/firmware/build", json={"sketch": "rf_capture", "board": "esp32s3", "action": "flash", "port": f"ota:{fake_bridge}"})
         assert r.status_code == 400 and "no over-the-air" in r.json()["detail"]

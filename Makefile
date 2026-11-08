@@ -6,7 +6,7 @@
 #   make sim            same, with the fake Arduino (no hardware)
 #   make test           run the test suite
 #
-# Overrides:  make flash BOARD=esp32s3|nano|nano-old PORT=/dev/cu.usbmodem1101   (Linux: /dev/ttyACM0)
+# Overrides:  make flash BOARD=esp32s3|esp32|esp32s2|esp32c3|esp32c6|nano|nano-old PORT=/dev/cu.usbmodem1101   (Linux: /dev/ttyACM0)
 #             make run HOST=0.0.0.0 PORT_HTTP=8080
 #
 # Works on macOS and Linux. Needs Python 3.10+; uses uv when installed, plain
@@ -34,6 +34,10 @@ URL       := http://$(HOST):$(PORT_HTTP)
 
 SKETCH    ?= firmware/rf_capture      # or: make flash SKETCH=firmware/ha_bridge
 FQBN_esp32s3  := esp32:esp32:esp32s3:CDCOnBoot=cdc
+FQBN_esp32    := esp32:esp32:esp32
+FQBN_esp32s2  := esp32:esp32:esp32s2:CDCOnBoot=cdc
+FQBN_esp32c3  := esp32:esp32:esp32c3:CDCOnBoot=cdc
+FQBN_esp32c6  := esp32:esp32:esp32c6:CDCOnBoot=cdc
 FQBN_nano     := arduino:avr:nano
 FQBN_nano-old := arduino:avr:nano:cpu=atmega328old
 
@@ -53,7 +57,7 @@ help:
 	@echo "  make export       dump the library to remotes-export.json"
 	@echo "  make clean        remove build output, caches and the venv"
 	@echo ""
-	@echo "Overrides: BOARD=esp32s3|nano|nano-old  PORT=/dev/cu.xxx|/dev/ttyACM0  HOST=  PORT_HTTP="
+	@echo "Overrides: BOARD=esp32s3|esp32|esp32s2|esp32c3|esp32c6|nano|nano-old  PORT=/dev/cu.xxx|/dev/ttyACM0  HOST=  PORT_HTTP="
 	@echo ""
 
 # --------------------------------------------------------------------------- setup
@@ -120,7 +124,7 @@ compile-esp32s3:
 
 flash: setup-python
 	@test -n "$(PORT)"  || { echo "no board detected. Plug it in, or pass PORT=/dev/cu.xxx (Linux: /dev/ttyACM0)"; exit 1; }
-	@test -n "$(FQBN)"  || { echo "unknown board '$(BOARD)'. Pass BOARD=esp32s3, nano or nano-old"; exit 1; }
+	@test -n "$(FQBN)"  || { echo "unknown board '$(BOARD)'. Pass BOARD=esp32s3, esp32, esp32s2, esp32c3, esp32c6, nano or nano-old"; exit 1; }
 	@echo "→ flashing $(BOARD) on $(PORT)"
 	$(ACLI) compile --fqbn $(FQBN) $(SKETCH)
 	$(ACLI) upload  --fqbn $(FQBN) -p $(PORT) $(SKETCH)

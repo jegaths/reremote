@@ -130,8 +130,12 @@ class ConnectBody(BaseModel):
 @app.get("/api/ports")
 async def api_ports() -> list[dict[str, str]]:
     ports = list_serial_ports()
+    st = engine.status()
     for p in ports:
         p["board"] = fw.guess_board(p["description"])
+        # the capture firmware names its chip; better than any USB-id guess
+        if st.get("connected") and st.get("port") == p["device"] and st.get("board") in fw.FQBN:
+            p["board"] = st["board"]
     return ports
 
 

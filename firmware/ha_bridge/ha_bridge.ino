@@ -1,5 +1,6 @@
 /*
- * ha_bridge.ino  --  433 MHz remote -> Home Assistant, on an ESP32-S3
+ * ha_bridge.ino  --  433 MHz remote -> Home Assistant, on any WiFi ESP32
+ *                    (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6)
  *
  * Listens to the receiver, decodes frames with the rc-switch library (same
  * protocol table the capture UI uses), matches them against the button table
@@ -16,7 +17,7 @@
  *
  * Wiring: receiver VCC -> 3V3, GND -> GND, DAT -> GPIO RX_PIN (config.h), antenna 17.3 cm.
  *
- * Serial (115200, native USB) prints one line per event so the capture UI's
+ * Serial (115200) prints one line per event so the capture UI's
  * Serial log can follow along:
  *   I ha_bridge <version> buttons=<n> wifi=<ssid> host=<hostname>
  *   W <wifi status / ip>
@@ -26,8 +27,8 @@
  *   U <over-the-air update progress>
  *   E <message>
  *
- * Build: ESP32S3 Dev Module, "USB CDC On Boot: Enabled", default partition
- * scheme (two OTA app slots). Library: rc-switch.
+ * Build: the matching ESP32 board, "USB CDC On Boot: Enabled" on chips with
+ * native USB, default partition scheme (two OTA app slots). Library: rc-switch.
  */
 
 #include <WiFi.h>
@@ -39,7 +40,19 @@
 #include <RCSwitch.h>
 #include "config.h"
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
+
+#if CONFIG_IDF_TARGET_ESP32S3
+  #define BOARD_NAME "esp32s3"
+#elif CONFIG_IDF_TARGET_ESP32S2
+  #define BOARD_NAME "esp32s2"
+#elif CONFIG_IDF_TARGET_ESP32C3
+  #define BOARD_NAME "esp32c3"
+#elif CONFIG_IDF_TARGET_ESP32C6
+  #define BOARD_NAME "esp32c6"
+#else
+  #define BOARD_NAME "esp32"
+#endif
 
 #ifndef RX_PIN
 #define RX_PIN 4
@@ -199,7 +212,7 @@ static String jsonStr(const char *s) {
 }
 
 static void handleStatus() {
-  String s = "{\"firmware\":\"ha_bridge\",\"version\":\"" FW_VERSION "\",\"hostname\":\"" HOSTNAME "\"";
+  String s = "{\"firmware\":\"ha_bridge\",\"version\":\"" FW_VERSION "\",\"board\":\"" BOARD_NAME "\",\"hostname\":\"" HOSTNAME "\"";
   s += ",\"ip\":\"" + WiFi.localIP().toString() + "\"";
   s += ",\"rssi\":" + String(WiFi.RSSI());
   s += ",\"uptime_s\":" + String(millis() / 1000);
@@ -307,6 +320,8 @@ static void printIdent() {
   Serial.print(WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String(WIFI_SSID));
   Serial.print(F(" host="));
   Serial.print(HOSTNAME);
+  Serial.print(F(" board="));
+  Serial.print(F(BOARD_NAME));
   Serial.print(F(" rx_pin="));
   Serial.println(RX_PIN);
 }

@@ -1,7 +1,7 @@
 # Home Assistant bridge
 
 Once the buttons are in the library, the **Home Assistant** tab turns the
-ESP32-S3 into a standalone bridge. It listens to the remote, recognises the
+ESP32 into a standalone bridge. It listens to the remote, recognises the
 buttons using the same masks the library learned, and calls Home Assistant
 services over WiFi. The computer isn't needed after flashing.
 
@@ -13,7 +13,9 @@ services over WiFi. The computer isn't needed after flashing.
   Assistant** (e.g. a smart switch on the fan's power line, a smart bulb, or a
   scene). ReRemote only maps remote buttons to actions on existing entities.
   It doesn't add or pair devices.
-- An ESP32-S3 (the Nano can't run the WiFi bridge) and 2.4 GHz WiFi.
+- An ESP32 with WiFi: ESP32, S2, S3, C3 or C6 (the Nano can't run the WiFi
+  bridge), and a 2.4 GHz WiFi network. Pick your chip in the board list
+  before the first USB flash; later WiFi updates detect it automatically.
 - The remote's buttons already captured and saved in the library.
 
 1. **Home Assistant tab → Connection.** Enter the WiFi SSID and password, the

@@ -106,25 +106,33 @@
     const s = sketches.find((x) => x.name === current);
     const opts = lastPorts.map((p) => `<option value="${esc(p.device)}" data-board="${p.board}">${esc(p.device)} — ${esc(p.description)}</option>`);
     if (s && s.ota && bridge && bridge.online && bridge.ota) {
-      opts.push(`<option value="${esc(bridge.ota_port)}" data-board="esp32s3">WiFi: ${esc(bridge.host)} — ha_bridge ${esc(bridge.version)} at ${esc(bridge.ip)}</option>`);
+      opts.push(`<option value="${esc(bridge.ota_port)}" data-board="${esc(bridge.board || "esp32s3")}">WiFi: ${esc(bridge.host)} — ha_bridge ${esc(bridge.version)} at ${esc(bridge.ip)}</option>`);
     }
     sel.innerHTML = opts.join("") || `<option value="">No board detected</option>`;
     if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
-    autoBoard(); updateButtons();
+    updateButtons();
   }
+  // The board is always the user's explicit choice: never guessed, never reset by
+  // the periodic port refresh. Starts empty; a build without one asks for it.
   function fillBoards() {
     const s = sketches.find((x) => x.name === current);
     const allowed = s ? s.boards : Object.keys(boards);
     const sel = $("fw-board"); const cur = sel.value;
-    sel.innerHTML = allowed.map((b) => `<option value="${b}">${esc(boards[b] || b)}</option>`).join("");
-    if (allowed.includes(cur)) sel.value = cur; else autoBoard();
+    sel.innerHTML = `<option value="">Select board…</option>` +
+      allowed.map((b) => `<option value="${b}">${esc(boards[b] || b)}</option>`).join("");
+    sel.value = allowed.includes(cur) ? cur : "";
   }
-  function autoBoard() {
-    const opt = $("fw-port").selectedOptions[0];
-    const guess = opt && opt.dataset.board;
-    if (guess && [...$("fw-board").options].some((o) => o.value === guess)) $("fw-board").value = guess;
+  $("fw-port").onchange = updateButtons;
+  $("fw-board").onchange = () => { $("fw-board").classList.remove("invalid"); updateButtons(); };
+  function requireBoard() {
+    const sel = $("fw-board");
+    if (sel.value) return true;
+    sel.classList.add("invalid");
+    sel.focus();
+    try { sel.showPicker(); } catch (_) { /* not supported everywhere */ }
+    toast("Select your board first (Firmware tab → Board)", true);
+    return false;
   }
-  $("fw-port").onchange = autoBoard;
   function updateButtons() {
     $("fw-save").disabled = !dirty;
     $("fw-save").classList.toggle("dirty", dirty);
@@ -148,11 +156,19 @@
       toast(action === "flash" ? "Flashing… watch the build output" : "Compiling…");
     } catch (e) { building = false; updateButtons(); toast(e.message, true); }
   }
-  $("fw-compile").onclick = () => build("compile");
+  $("fw-compile").onclick = () => { if (requireBoard()) build("compile"); };
   $("fw-flash").onclick = () => {
+    if (!requireBoard()) return;
     const s = sketches.find((x) => x.name === current);
     const port = $("fw-port").value;
-    const where = isOta(port) ? `the bridge at ${port.slice(4)} over WiFi` : `${port} as ${boards[$("fw-board").value]}`;
+    const board = $("fw-board").value;
+    let where = `${port} as ${boards[board]}`;
+    if (isOta(port)) {
+      where = `the bridge at ${port.slice(4)} over WiFi as ${boards[board]}`;
+      // the bridge reports its own chip; a mismatch would push a binary it cannot run
+      if (bridge && bridge.board && bridge.board !== board)
+        where += `\n\nWarning: the bridge reports it is an ${boards[bridge.board] || bridge.board}. Flashing a build for another chip will fail.`;
+    }
     if (!confirm(`Flash "${s.title}" to ${where}?`)) return;
     build("flash");
   };
@@ -183,11 +199,11 @@
     const sel = $("fw-port");
     if (port) {
       if (![...sel.options].some((o) => o.value === port)) return toast(`${port.replace(/^ota:/, "")} is not answering; cannot update over WiFi`, true);
-      sel.value = port; autoBoard(); updateButtons();
+      sel.value = port; updateButtons();
     } else {
-      const usb = lastPorts.find((p) => p.board === "esp32s3") || lastPorts[0];
-      if (!usb) return toast("No board detected: plug the ESP32-S3 in first", true);
-      sel.value = usb.device; autoBoard(); updateButtons();
+      const usb = lastPorts.find((p) => (p.board || "").startsWith("esp32")) || lastPorts[0];
+      if (!usb) return toast("No board detected: plug the ESP32 in first", true);
+      sel.value = usb.device; updateButtons();
     }
     $("fw-flash").click();
   };

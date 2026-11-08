@@ -1,7 +1,7 @@
 """Print the serial port of the attached board and a guess of which board it is.
 
 Usage: findport.py [port|board|both|list]   (default: both, as "PORT BOARD")
-BOARD is one of: esp32s3, nano, nano-old, unknown. Exit 1 when nothing found.
+BOARD is one of: esp32s3, esp32, nano, nano-old, unknown (a guess; S2/C3/C6 need BOARD=). Exit 1 when nothing found.
 """
 import sys
 from pathlib import Path

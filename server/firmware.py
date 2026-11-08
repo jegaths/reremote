@@ -30,10 +30,19 @@ if _LOCAL_BIN.is_dir() and str(_LOCAL_BIN) not in os.environ.get("PATH", "").spl
 
 FQBN = {
     "esp32s3": "esp32:esp32:esp32s3:CDCOnBoot=cdc",
+    "esp32": "esp32:esp32:esp32",
+    "esp32s2": "esp32:esp32:esp32s2:CDCOnBoot=cdc",
+    "esp32c3": "esp32:esp32:esp32c3:CDCOnBoot=cdc",
+    "esp32c6": "esp32:esp32:esp32c6:CDCOnBoot=cdc",
     "nano": "arduino:avr:nano",
     "nano-old": "arduino:avr:nano:cpu=atmega328old",
 }
-BOARD_LABEL = {"esp32s3": "ESP32-S3", "nano": "Arduino Nano", "nano-old": "Arduino Nano (old bootloader)"}
+BOARD_LABEL = {
+    "esp32s3": "ESP32-S3", "esp32": "ESP32 (classic)", "esp32s2": "ESP32-S2",
+    "esp32c3": "ESP32-C3", "esp32c6": "ESP32-C6",
+    "nano": "Arduino Nano", "nano-old": "Arduino Nano (old bootloader)",
+}
+ESP32_BOARDS = frozenset(b for b in FQBN if b.startswith("esp32"))
 
 TEXT_EXT = {".ino", ".h", ".hpp", ".c", ".cpp", ".json", ".md", ".txt", ".example"}
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,40}$")
@@ -53,9 +62,12 @@ void loop() {{
 
 
 def guess_board(description: str) -> str:
+    """Best guess from the USB description; the UI and BOARD= can override it."""
     d = (description or "").lower()
+    if "native usb" in d:
+        return "esp32s3"         # S3/C3/C6 share the same USB id; the S3 is the common one
     if "esp32" in d:
-        return "esp32s3"
+        return "esp32"           # UART bridge chip: most often a classic ESP32 dev board
     if "ch340" in d:
         return "nano-old"        # CH340 clones nearly always ship the old bootloader
     if "ftdi" in d or "arduino" in d:
@@ -228,8 +240,8 @@ class BuildRunner:
         if action == "flash" and not port:
             raise ValueError("port required to flash")
         if is_ota_port(port):
-            if board != "esp32s3":
-                raise ValueError("over-the-air updates are only possible on the ESP32-S3")
+            if board not in ESP32_BOARDS:
+                raise ValueError("over-the-air updates are only possible on an ESP32")
             if not _manifest(sketch_dir(sketch)).get("ota"):
                 raise ValueError("this sketch has no over-the-air update support")
             if action == "flash" and uploader is None:

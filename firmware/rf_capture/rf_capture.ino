@@ -1,13 +1,14 @@
 /*
  * rf_capture.ino  --  raw 433 MHz OOK frame capture
- *                     for Arduino Nano (ATmega328P) and ESP32-S3
+ *                     for Arduino Nano (ATmega328P) and ESP32 boards
+ *                     (ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6)
  *
  * Wiring, Arduino Nano:
  *   receiver VCC  -> Nano 5V
  *   receiver GND  -> Nano GND
  *   receiver DATA -> Nano D2   (INT0, external interrupt)
  *
- * Wiring, ESP32-S3 (3.3 V logic: power the receiver from 3V3, NOT 5V/VBUS,
+ * Wiring, any ESP32 (3.3 V logic: power the receiver from 3V3, NOT 5V/VBUS,
  * otherwise its DATA line drives 5 V into a GPIO that is not 5 V tolerant):
  *   receiver VCC  -> 3V3
  *   receiver GND  -> GND
@@ -15,9 +16,10 @@
  *
  * Both: antenna -> 17.3 cm straight wire on the ANT pad (quarter wave @ 433.92 MHz)
  *
- * ESP32-S3 boards often have two USB sockets. This sketch mirrors its output
- * to both the native USB port ("USB") and the UART bridge ("COM"/"UART"), so
- * either socket works. Build with "USB CDC On Boot: Enabled".
+ * Boards with native USB (S2/S3/C3/C6) often have two USB sockets. Built with
+ * "USB CDC On Boot: Enabled", this sketch mirrors its output to both the
+ * native USB port ("USB") and the UART bridge ("COM"/"UART"), so either socket
+ * works. A classic ESP32 has only the UART bridge and uses plain Serial.
  *
  * What it does
  *   Every edge on D2 is timestamped in an interrupt. The main loop groups the
@@ -41,14 +43,25 @@
  *   N <n>         set minimum number of edges for a frame to be reported
  */
 
-#define FW_VERSION "1.1.0"
+#define FW_VERSION "1.2.0"
 
 // ---- board selection ---------------------------------------------------------
 #if defined(ARDUINO_ARCH_ESP32)
+ #if CONFIG_IDF_TARGET_ESP32S3
   #define BOARD_NAME "esp32s3"
+ #elif CONFIG_IDF_TARGET_ESP32S2
+  #define BOARD_NAME "esp32s2"
+ #elif CONFIG_IDF_TARGET_ESP32C3
+  #define BOARD_NAME "esp32c3"
+ #elif CONFIG_IDF_TARGET_ESP32C6
+  #define BOARD_NAME "esp32c6"
+ #else
+  #define BOARD_NAME "esp32"
+ #endif
   #define RX_PIN 4
   #define ISR_ATTR IRAM_ATTR
-  // Mirror everything to both USB sockets of the S3
+ #if ARDUINO_USB_CDC_ON_BOOT
+  // Native USB chip: Serial is the USB port, Serial0 the UART bridge. Mirror to both.
   struct DualSerial : public Print {
     size_t write(uint8_t c) override { Serial.write(c); Serial0.write(c); return 1; }
     size_t write(const uint8_t *b, size_t n) override { Serial.write(b, n); Serial0.write(b, n); return n; }
@@ -62,6 +75,9 @@
 #endif
     }
   } OUT;
+ #else
+  #define OUT Serial
+ #endif
 #else
   #define BOARD_NAME "nano"
   #define RX_PIN 2

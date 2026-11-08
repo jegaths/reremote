@@ -158,3 +158,4 @@ h3 { font-size: 13px; margin: 14px 0 8px; color: var(--muted); font-weight: 600;
 .bridge-line .dot.off { background: var(--danger); }
 .bridge-meta { color: var(--muted); font-size: 12px; margin: 4px 0 2px 20px; display: flex; gap: 14px; flex-wrap: wrap; }
 .bridge-card .hint { margin-top: 10px; }
+select.invalid { border-color: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 35%, transparent); }

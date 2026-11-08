@@ -64,7 +64,8 @@
     $("btn-sim").classList.toggle("hidden", on);
     $("btn-disconnect").classList.toggle("hidden", !on);
     $("port-select").disabled = on;
-    const boardName = { nano: "Arduino Nano", esp32s3: "ESP32-S3" }[s.board] || s.board;
+    const boardName = { nano: "Arduino Nano", esp32: "ESP32", esp32s2: "ESP32-S2", esp32s3: "ESP32-S3",
+                        esp32c3: "ESP32-C3", esp32c6: "ESP32-C6" }[s.board] || s.board;
     $("st-source").textContent = on
       ? (s.source === "simulator" ? "Simulator running" : `Connected: ${s.port}${boardName ? " · " + boardName : ""}`)
       : "Not connected";

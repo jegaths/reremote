@@ -28,8 +28,8 @@ log = logging.getLogger("capture")
 
 # USB vendor/product ids of the boards we expect, for a friendlier port label
 KNOWN_USB = {
-    (0x303A, 0x1001): "ESP32-S3 native USB",
-    (0x303A, 0x0002): "ESP32-S3 native USB (TinyUSB)",
+    (0x303A, 0x1001): "ESP32 native USB (S3/C3/C6)",
+    (0x303A, 0x0002): "ESP32-S2/S3 native USB (TinyUSB)",
     (0x10C4, 0xEA60): "CP2102 UART bridge (ESP32 dev board)",
     (0x1A86, 0x55D3): "CH343 UART bridge (ESP32 dev board)",
     (0x1A86, 0x55D4): "CH9102 UART bridge (ESP32 dev board)",

@@ -104,8 +104,8 @@ environment variable). **Export JSON** in the Library panel, `make export`, or
 ## Code layout
 
 ```
-firmware/rf_capture/   capture sketch for Nano and ESP32-S3
-firmware/ha_bridge/    ESP32-S3 sketch: remote -> Home Assistant over WiFi
+firmware/rf_capture/   capture sketch for Nano and ESP32 boards
+firmware/ha_bridge/    ESP32 sketch: remote -> Home Assistant over WiFi
 server/app.py          FastAPI app + CLI entry point
 server/capture.py      serial thread, burst grouping, SSE hub
 server/decoder.py      rc-switch protocol table, raw fingerprint

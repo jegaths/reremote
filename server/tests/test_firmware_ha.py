@@ -13,8 +13,10 @@ from ha import generate_config_h, action_to_call  # noqa: E402
 
 
 def test_guess_board():
-    assert fw.guess_board("ESP32-S3 native USB") == "esp32s3"
-    assert fw.guess_board("CP2102 UART bridge (ESP32 dev board)") == "esp32s3"
+    assert fw.guess_board("ESP32 native USB (S3/C3/C6)") == "esp32s3"
+    assert fw.guess_board("CP2102 UART bridge (ESP32 dev board)") == "esp32"
+    assert {"esp32", "esp32s2", "esp32s3", "esp32c3", "esp32c6"} <= fw.ESP32_BOARDS
+    assert "nano" not in fw.ESP32_BOARDS
     assert fw.guess_board("CH340 (Arduino Nano clone)") == "nano-old"
     assert fw.guess_board("FTDI (Arduino Nano)") == "nano"
     assert fw.guess_board("") == "unknown"
