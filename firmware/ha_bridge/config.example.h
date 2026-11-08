@@ -1,4 +1,4 @@
-// Example of the file the rc-capture server generates as config.h before each
+// Example of the file the ReRemote server generates as config.h before each
 // build of this sketch (Home Assistant tab -> settings + button actions).
 // config.h itself is gitignored because it holds your WiFi password and token.
 #pragma once
@@ -9,7 +9,7 @@
 #define HA_URL    "http://homeassistant.local:8123"
 #define HA_TOKEN  "eyJ...long-lived-access-token..."
 #define RX_PIN    4
-#define HOSTNAME  "rc-bridge"            // reachable as rc-bridge.local on the LAN
+#define HOSTNAME  "reremote-bridge"      // reachable as reremote-bridge.local on the LAN
 #define OTA_TOKEN "random-secret"        // required in X-OTA-Token to update over WiFi
 
 struct ButtonMap {

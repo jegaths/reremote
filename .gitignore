@@ -7,3 +7,5 @@ firmware/**/build/
 .DS_Store
 
 firmware/*/config.h
+.tools/
+remotes-export.json

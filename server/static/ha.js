@@ -9,8 +9,8 @@
     $("ha-ssid").value = s.wifi_ssid || "";
     $("ha-url").value = s.ha_url || "";
     $("ha-pin").value = s.rx_pin || "4";
-    $("ha-host").value = s.bridge_host || "rc-bridge.local";
-    $("bridge-host").textContent = s.bridge_host || "rc-bridge.local";
+    $("ha-host").value = s.bridge_host || "reremote-bridge.local";
+    $("bridge-host").textContent = s.bridge_host || "reremote-bridge.local";
     $("ha-wpass").placeholder = s.wifi_pass_set ? "(saved, leave blank to keep)" : "WiFi password";
     $("ha-token").placeholder = s.ha_token_set ? "(saved, leave blank to keep)" : "paste the long-lived token";
     $("ha-status").textContent = s.ha_url ? "" : "not configured";
@@ -21,7 +21,7 @@
       await api("/api/ha/settings", { method: "PUT", body: {
         wifi_ssid: $("ha-ssid").value, wifi_pass: $("ha-wpass").value, ha_url: $("ha-url").value.trim(),
         ha_token: $("ha-token").value.trim(), rx_pin: $("ha-pin").value.trim() || "4",
-        bridge_host: $("ha-host").value.trim() || "rc-bridge.local" } });
+        bridge_host: $("ha-host").value.trim() || "reremote-bridge.local" } });
       $("ha-wpass").value = ""; $("ha-token").value = "";
       await loadSettings(); toast("Settings saved"); probeBridge();
     } catch (err) { toast(err.message, true); }

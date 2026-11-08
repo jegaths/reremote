@@ -1,4 +1,4 @@
-/* RC Capture front-end: plain JS, talks to the FastAPI backend and listens to SSE. */
+/* ReRemote front-end: plain JS, talks to the FastAPI backend and listens to SSE. */
 (() => {
   const $ = (id) => document.getElementById(id);
   const feed = $("feed"), library = $("library");

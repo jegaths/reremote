@@ -13,13 +13,13 @@ from ha import generate_config_h  # noqa: E402
 
 
 def test_host_helpers():
-    assert ota.normalize_host(None) == "rc-bridge.local"
+    assert ota.normalize_host(None) == "reremote-bridge.local"
     assert ota.normalize_host(" http://192.168.88.6/ ") == "192.168.88.6"
     assert ota.normalize_host("ota:fan-bridge.local") == "fan-bridge.local"
     assert ota.hostname_for("fan-bridge.local") == "fan-bridge"
-    assert ota.hostname_for("192.168.88.6:80") == "rc-bridge"
-    assert fw.is_ota_port("ota:rc-bridge.local") and not fw.is_ota_port("/dev/cu.usbmodem1") and not fw.is_ota_port(None)
-    assert fw.ota_host("ota:rc-bridge.local") == "rc-bridge.local"
+    assert ota.hostname_for("192.168.88.6:80") == "reremote-bridge"
+    assert fw.is_ota_port("ota:reremote-bridge.local") and not fw.is_ota_port("/dev/cu.usbmodem1") and not fw.is_ota_port(None)
+    assert fw.ota_host("ota:reremote-bridge.local") == "reremote-bridge.local"
     assert len(ota.new_token()) >= 20
 
 
@@ -98,14 +98,14 @@ def test_upload_roundtrip(fake_bridge, tmp_path, monkeypatch):
 
 
 def test_bridge_api(tmp_path, monkeypatch, fake_bridge):
-    monkeypatch.setenv("RC_DB", str(tmp_path / "api.sqlite"))
+    monkeypatch.setenv("REREMOTE_DB", str(tmp_path / "api.sqlite"))
     sys.modules.pop("app", None)
     import app as appmod
     from fastapi.testclient import TestClient
 
     with TestClient(appmod.app) as c:
         s = c.get("/api/ha/settings").json()
-        assert s["bridge_host"] == "rc-bridge.local" and s["ota_token_set"] and "ota_token" not in s
+        assert s["bridge_host"] == "reremote-bridge.local" and s["ota_token_set"] and "ota_token" not in s
         assert c.put("/api/ha/settings", json={"bridge_host": f"http://{fake_bridge}/"}).json()["bridge_host"] == fake_bridge
         token = appmod._settings()["ota_token"]
         _Bridge.token = token

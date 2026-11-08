@@ -1,4 +1,4 @@
-# rc-capture — one entry point for everything.
+# ReRemote — one entry point for everything.
 #
 #   make setup          install Python deps, arduino-cli and both board cores (idempotent)
 #   make flash          compile + upload the firmware to whatever board is plugged in
@@ -6,8 +6,12 @@
 #   make sim            same, with the fake Arduino (no hardware)
 #   make test           run the test suite
 #
-# Overrides:  make flash BOARD=esp32s3|nano|nano-old PORT=/dev/cu.usbmodem1101
+# Overrides:  make flash BOARD=esp32s3|nano|nano-old PORT=/dev/cu.usbmodem1101   (Linux: /dev/ttyACM0)
 #             make run HOST=0.0.0.0 PORT_HTTP=8080
+#
+# Works on macOS and Linux. Needs Python 3.10+; uses uv when installed, plain
+# venv + pip otherwise. arduino-cli is taken from PATH, or downloaded into
+# .tools/bin (inside this folder) when missing.
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
@@ -15,7 +19,14 @@ SHELL := /bin/bash
 VENV      := .venv
 PY        := $(VENV)/bin/python
 UV        := $(shell command -v uv 2>/dev/null)
-ARDUINO   := $(shell command -v arduino-cli 2>/dev/null)
+PYTHON3   ?= python3
+TOOLS_BIN := $(CURDIR)/.tools/bin
+export PATH := $(TOOLS_BIN):$(PATH)
+UNAME     := $(shell uname -s)
+ACLI_VERSION := 1.5.1
+ACLI_DOCS    := https://arduino.github.io/arduino-cli/latest/installation/
+# the local copy wins; recursive so it sees a copy downloaded by setup-arduino
+ACLI          = $(firstword $(wildcard $(TOOLS_BIN)/arduino-cli) arduino-cli)
 ESP32_URL := https://espressif.github.io/arduino-esp32/package_esp32_index.json
 HOST      ?= 127.0.0.1
 PORT_HTTP ?= 8000
@@ -30,7 +41,7 @@ FQBN_nano-old := arduino:avr:nano:cpu=atmega328old
 .PHONY: help
 help:
 	@echo ""
-	@echo "rc-capture"
+	@echo "ReRemote"
 	@echo "  make setup        install everything (python env, arduino-cli, Nano + ESP32 cores)"
 	@echo "  make flash        compile + upload firmware (SKETCH=firmware/ha_bridge for the bridge)"
 	@echo "  make run          start backend + UI at $(URL)"
@@ -42,7 +53,7 @@ help:
 	@echo "  make export       dump the library to remotes-export.json"
 	@echo "  make clean        remove build output, caches and the venv"
 	@echo ""
-	@echo "Overrides: BOARD=esp32s3|nano|nano-old  PORT=/dev/cu.xxx  HOST=  PORT_HTTP="
+	@echo "Overrides: BOARD=esp32s3|nano|nano-old  PORT=/dev/cu.xxx|/dev/ttyACM0  HOST=  PORT_HTTP="
 	@echo ""
 
 # --------------------------------------------------------------------------- setup
@@ -53,25 +64,38 @@ setup: setup-python setup-arduino
 
 setup-python: $(VENV)/.ok
 $(VENV)/.ok: server/requirements.txt
-ifndef UV
-	$(error uv not found. Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh)
-endif
+ifdef UV
 	@test -x $(PY) || uv venv $(VENV) -q
 	@uv pip install -q --python $(PY) -r server/requirements.txt
+else
+	@$(PYTHON3) -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null \
+	  || { echo "Python 3.10 or newer is needed (or install uv: https://docs.astral.sh/uv/)"; exit 1; }
+	@test -x $(PY) || $(PYTHON3) -m venv $(VENV) \
+	  || { echo "could not create a venv; on Debian/Ubuntu: sudo apt install python3-venv"; exit 1; }
+	@$(PY) -m pip install -q --upgrade pip
+	@$(PY) -m pip install -q -r server/requirements.txt
+endif
 	@touch $@
 	@echo "✔ python deps installed in $(VENV)"
 
 setup-arduino:
 	@if ! command -v arduino-cli >/dev/null; then \
-	  if command -v brew >/dev/null; then echo "installing arduino-cli via brew"; brew install arduino-cli; \
-	  else echo "arduino-cli not found and brew missing: see https://arduino.github.io/arduino-cli/latest/installation/"; exit 1; fi; \
+	  case "$(UNAME)" in Darwin) os=macOS;; Linux) os=Linux;; *) os=;; esac; \
+	  case "$$(uname -m)" in x86_64|amd64) arch=64bit;; arm64|aarch64) arch=ARM64;; armv7l) arch=ARMv7;; *) arch=;; esac; \
+	  test -n "$$os" -a -n "$$arch" || { echo "no arduino-cli download for this system: install it by hand, see $(ACLI_DOCS)"; exit 1; }; \
+	  echo "arduino-cli not found: downloading $(ACLI_VERSION) into .tools/bin"; \
+	  mkdir -p $(TOOLS_BIN) && \
+	  curl -fsSL https://downloads.arduino.cc/arduino-cli/arduino-cli_$(ACLI_VERSION)_$${os}_$${arch}.tar.gz \
+	    | tar -xz -C $(TOOLS_BIN) arduino-cli \
+	  || { echo "download failed: install arduino-cli by hand, see $(ACLI_DOCS)"; exit 1; }; \
 	fi
-	@arduino-cli config init --overwrite >/dev/null 2>&1 || true
-	@arduino-cli config add board_manager.additional_urls $(ESP32_URL) >/dev/null 2>&1 || true
-	@arduino-cli core update-index >/dev/null
-	@arduino-cli core list | grep -q '^arduino:avr' || arduino-cli core install arduino:avr
-	@arduino-cli core list | grep -q '^esp32:esp32' || arduino-cli core install esp32:esp32
-	@arduino-cli lib list 2>/dev/null | grep -q '^rc-switch' || arduino-cli lib install rc-switch
+	@$(ACLI) config init >/dev/null 2>&1 || true
+	@$(ACLI) config get board_manager.additional_urls 2>/dev/null | grep -q espressif \
+	  || $(ACLI) config add board_manager.additional_urls $(ESP32_URL) >/dev/null
+	@$(ACLI) core update-index >/dev/null
+	@$(ACLI) core list | grep -q '^arduino:avr' || $(ACLI) core install arduino:avr
+	@$(ACLI) core list | grep -q '^esp32:esp32' || $(ACLI) core install esp32:esp32
+	@$(ACLI) lib list 2>/dev/null | grep -q '^rc-switch' || $(ACLI) lib install rc-switch
 	@echo "✔ arduino-cli ready with Nano and ESP32 cores and the rc-switch library"
 
 # --------------------------------------------------------------------------- firmware
@@ -84,35 +108,42 @@ FQBN   = $(FQBN_$(BOARD))
 ports: setup-python
 	@$(PY) scripts/findport.py list
 	@echo "detected: $$($(PY) scripts/findport.py both 2>/dev/null || echo none)"
+ifeq ($(UNAME),Linux)
+	@id -nG | grep -qwE 'dialout|uucp' || echo "note: add yourself to the serial group, then log out and in: sudo usermod -aG dialout $$USER"
+endif
 
 compile: compile-nano compile-esp32s3
 compile-nano:
-	arduino-cli compile --fqbn $(FQBN_nano) $(SKETCH)
+	$(ACLI) compile --fqbn $(FQBN_nano) $(SKETCH)
 compile-esp32s3:
-	arduino-cli compile --fqbn $(FQBN_esp32s3) $(SKETCH)
+	$(ACLI) compile --fqbn $(FQBN_esp32s3) $(SKETCH)
 
 flash: setup-python
-	@test -n "$(PORT)"  || { echo "no board detected. Plug it in, or pass PORT=/dev/cu.xxx"; exit 1; }
+	@test -n "$(PORT)"  || { echo "no board detected. Plug it in, or pass PORT=/dev/cu.xxx (Linux: /dev/ttyACM0)"; exit 1; }
 	@test -n "$(FQBN)"  || { echo "unknown board '$(BOARD)'. Pass BOARD=esp32s3, nano or nano-old"; exit 1; }
 	@echo "→ flashing $(BOARD) on $(PORT)"
-	arduino-cli compile --fqbn $(FQBN) $(SKETCH)
-	arduino-cli upload  --fqbn $(FQBN) -p $(PORT) $(SKETCH)
+	$(ACLI) compile --fqbn $(FQBN) $(SKETCH)
+	$(ACLI) upload  --fqbn $(FQBN) -p $(PORT) $(SKETCH)
 	@echo "✔ flashed. Now: make run"
 
 monitor:
 	@test -n "$(PORT)" || { echo "no board detected"; exit 1; }
-	arduino-cli monitor -p $(PORT) -c baudrate=115200
+	$(ACLI) monitor -p $(PORT) -c baudrate=115200
 
 # --------------------------------------------------------------------------- server
 .PHONY: run sim test export
+OPEN_UI = ( sleep 1.5; $(PY) -m webbrowser -t $(URL) >/dev/null 2>&1 || true ) &
+
 run: setup-python
+ifeq ($(UNAME),Darwin)
 	@echo "If macOS asks whether Python may find devices on your local network, click Allow:"
 	@echo "the Home Assistant tab needs it to reach HA on your LAN."
-	@( sleep 1.5; open $(URL) 2>/dev/null || true ) &
+endif
+	@$(OPEN_UI)
 	$(PY) server/app.py --host $(HOST) --port $(PORT_HTTP)
 
 sim: setup-python
-	@( sleep 1.5; open $(URL) 2>/dev/null || true ) &
+	@$(OPEN_UI)
 	$(PY) server/app.py --host $(HOST) --port $(PORT_HTTP) --simulate
 
 test: setup-python

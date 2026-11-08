@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RC Capture</title>
+<title>ReRemote</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top">
   <div class="brand">
     <span class="dot" id="link-dot"></span>
-    <h1>RC Capture</h1>
+    <h1>ReRemote</h1>
     <span class="sub">433 MHz remote code library</span>
   </div>
   <div class="conn">
@@ -75,14 +75,14 @@
       <label>Home Assistant URL<input id="ha-url" placeholder="http://homeassistant.local:8123"></label>
       <label>Long-lived access token<input id="ha-token" type="password" placeholder="(unchanged)"></label>
       <label>Receiver DAT pin on the ESP32-S3<input id="ha-pin" value="4" class="narrow"></label>
-      <label>Bridge address on your network<input id="ha-host" placeholder="rc-bridge.local" autocomplete="off"></label>
+      <label>Bridge address on your network<input id="ha-host" placeholder="reremote-bridge.local" autocomplete="off"></label>
       <div class="row-btns">
         <button class="primary">Save settings</button>
         <button type="button" id="ha-test" class="ghost">Test Home Assistant</button>
         <button type="button" id="ha-load-entities" class="ghost">Load entities</button>
       </div>
     </form>
-    <p class="hint">Create the token in Home Assistant under your profile → Security → Long-lived access tokens. The WiFi password and token are stored only in the local database and written into the generated config.h at build time; neither is committed to git. The bridge announces itself as <code>rc-bridge.local</code>; enter its IP instead if that name does not resolve on your network.</p>
+    <p class="hint">Create the token in Home Assistant under your profile → Security → Long-lived access tokens. The WiFi password and token are stored only in the local database and written into the generated config.h at build time; neither is committed to git. The bridge announces itself as <code>reremote-bridge.local</code>; enter its IP instead if that name does not resolve on your network.</p>
     <div class="col-head"><h2>Installed bridge</h2><span class="muted" id="bridge-host"></span></div>
     <div id="bridge-card" class="bridge-card">
       <div class="bridge-line"><span class="dot" id="bridge-dot"></span><span id="bridge-summary">checking…</span></div>

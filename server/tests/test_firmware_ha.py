@@ -59,7 +59,7 @@ def test_config_h_generation():
 
 
 def test_http_firmware_and_ha_api(tmp_path, monkeypatch):
-    monkeypatch.setenv("RC_DB", str(tmp_path / "api.sqlite"))
+    monkeypatch.setenv("REREMOTE_DB", str(tmp_path / "api.sqlite"))
     sys.modules.pop("app", None)
     import app as appmod
     from fastapi.testclient import TestClient

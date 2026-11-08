@@ -22,6 +22,12 @@ from typing import Any, Callable, Optional
 
 FIRMWARE_DIR = Path(__file__).resolve().parents[1] / "firmware"
 
+# `make setup` downloads arduino-cli into .tools/bin when it is not installed
+# system-wide; make that copy visible even when the server is started by hand.
+_LOCAL_BIN = FIRMWARE_DIR.parent / ".tools" / "bin"
+if _LOCAL_BIN.is_dir() and str(_LOCAL_BIN) not in os.environ.get("PATH", "").split(os.pathsep):
+    os.environ["PATH"] = f"{_LOCAL_BIN}{os.pathsep}{os.environ.get('PATH', '')}"
+
 FQBN = {
     "esp32s3": "esp32:esp32:esp32s3:CDCOnBoot=cdc",
     "nano": "arduino:avr:nano",

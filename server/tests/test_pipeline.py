@@ -90,7 +90,7 @@ def test_database_roundtrip(tmp_path):
 
 
 def test_http_api(tmp_path, monkeypatch):
-    monkeypatch.setenv("RC_DB", str(tmp_path / "api.sqlite"))
+    monkeypatch.setenv("REREMOTE_DB", str(tmp_path / "api.sqlite"))
     for m in ("app",):
         sys.modules.pop(m, None)
     import app as appmod

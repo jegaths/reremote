@@ -4,7 +4,7 @@ The bridge runs a small HTTP server (see firmware/ha_bridge/ha_bridge.ino):
     GET  http://<host>/status   JSON with version, ip, rssi, uptime ...
     POST http://<host>/update   multipart upload of the new .bin, X-OTA-Token header
     POST http://<host>/reboot   X-OTA-Token header
-<host> defaults to rc-bridge.local, which macOS resolves through Bonjour.
+<host> defaults to reremote-bridge.local, which macOS resolves through Bonjour.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-DEFAULT_HOST = "rc-bridge.local"
+DEFAULT_HOST = "reremote-bridge.local"
 Emit = Callable[..., None]
 
 
@@ -34,7 +34,7 @@ def hostname_for(host: Optional[str]) -> str:
     h = normalize_host(host).split(":")[0]
     if h.endswith(".local"):
         return h[:-len(".local")]
-    return "rc-bridge"
+    return "reremote-bridge"
 
 
 def new_token() -> str:
@@ -81,7 +81,7 @@ def friendly_error(e: BaseException, host: str) -> str:
 
 
 def multipart(filename: str, data: bytes, field: str = "firmware") -> tuple[bytes, str]:
-    boundary = "----rcCapture" + secrets.token_hex(12)
+    boundary = "----reremote" + secrets.token_hex(12)
     head = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\n"
             "Content-Type: application/octet-stream\r\n\r\n").encode()
     tail = f"\r\n--{boundary}--\r\n".encode()

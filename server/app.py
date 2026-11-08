@@ -1,4 +1,4 @@
-"""rc-capture web server: FastAPI + SQLite + pyserial.
+"""ReRemote web server: FastAPI + SQLite + pyserial.
 
 Run:  uvicorn app:app --reload          (from the server/ directory)
   or: python app.py [--db path] [--simulate]
@@ -28,7 +28,7 @@ from ha import ACTIONS, HomeAssistant, action_to_call, generate_config_h
 import ota
 
 HERE = Path(__file__).parent
-DB_PATH = os.environ.get("RC_DB", str(HERE.parent / "data" / "remotes.sqlite"))
+DB_PATH = os.environ.get("REREMOTE_DB", str(HERE.parent / "data" / "remotes.sqlite"))
 Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -98,13 +98,13 @@ def _write_generated_config(sketch: str) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     hub.loop = asyncio.get_running_loop()
-    if os.environ.get("RC_SIMULATE") == "1":
+    if os.environ.get("REREMOTE_SIMULATE") == "1":
         engine.start_simulator()
     yield
     engine.disconnect()
 
 
-app = FastAPI(title="rc-capture", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="ReRemote", version="1.0.0", lifespan=lifespan)
 _server: Any = None     # the uvicorn Server when started via `python app.py`
 
 
@@ -547,7 +547,7 @@ class SettingsPatch(BaseModel):
     ha_url: Optional[str] = None
     ha_token: Optional[str] = None
     rx_pin: Optional[str] = None
-    bridge_host: Optional[str] = None     # where the installed bridge answers, default rc-bridge.local
+    bridge_host: Optional[str] = None     # where the installed bridge answers, default reremote-bridge.local
 
 
 class ActionBody(BaseModel):
@@ -695,13 +695,13 @@ async def api_export() -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
 
-    ap = argparse.ArgumentParser(description="rc-capture server")
+    ap = argparse.ArgumentParser(description="ReRemote server")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--simulate", action="store_true", help="start with the fake Arduino")
     args = ap.parse_args()
     if args.simulate:
-        os.environ["RC_SIMULATE"] = "1"
+        os.environ["REREMOTE_SIMULATE"] = "1"
     # Run the Server object ourselves so the SSE streams can see should_exit and
     # close on Ctrl-C; the grace timeout is a backstop for any other open request.
     _server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port,
