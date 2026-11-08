@@ -15,7 +15,7 @@ remote ──433 MHz──> receiver ──> ESP32 / Nano ──USB──> ReRem
 remote ──433 MHz──> receiver ──> ESP32 bridge ──WiFi──> Home Assistant
 ```
 
-<!-- TODO: add a screenshot or GIF of a capture card and the Home Assistant tab here -->
+![ReRemote's button library with all 11 buttons of a ceiling fan remote captured and decoded](docs/images/library.png)
 
 ## Features
 
